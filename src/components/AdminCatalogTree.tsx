@@ -14,10 +14,10 @@ import { MISSION_TIERS } from '../utils/gameRules';
 // Interfaces para el manejo de datos
 interface CatalogItem {
   id: string;
-  name?: string;
-  title?: string;
-  _collection?: string; // Para saber de qué colección vino (misiones o rutinas)
-  typeLabel?: string; // Etiqueta visual
+  name: string;
+  title: string;
+  _collection: string; // Para saber de qué colección vino (misiones o rutinas)
+  typeLabel: string; // Etiqueta visual
   [key: string]: any;
 }
 
