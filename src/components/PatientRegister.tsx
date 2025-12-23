@@ -28,10 +28,12 @@ export default function PatientRegister() {
     const email = auth.currentUser.email;
 
     try {
-      // 1. LÓGICA DE VINCULACIÓN (Solo si escribió código)
+      // 1. LÓGICA DE VINCULACIÓN Y AUTORIZACIÓN
       let initialCareTeam = {};
-      // CORRECCIÓN: Eliminamos la variable linkedProfessionalId que no se usaba
       let linkedProfessionalCode = null;
+      
+      // POR DEFECTO: Si no hay código, el paciente es libre (autorizado)
+      let isAuthorizedValue = true; 
 
       if (formData.code.trim()) {
         const cleanCode = formData.code.trim().toUpperCase();
@@ -47,6 +49,9 @@ export default function PatientRegister() {
           
           linkedProfessionalCode = cleanCode;
 
+          // ⚠️ REGLA DE NEGOCIO: Si se vincula con código, requiere aprobación.
+          isAuthorizedValue = false;
+
           const professionType = profData.professionType || 'general';
 
           initialCareTeam = {
@@ -54,15 +59,19 @@ export default function PatientRegister() {
               professionalId: profId,
               professionalName: profData.fullName,
               joinedAt: new Date().toISOString(),
-              active: true
+              
+              // Queda inactivo hasta que el profesional lo active en su Dashboard
+              active: false,             
+              status: 'pending_approval' 
             }
           };
         } else {
-          alert("⚠️ El código ingresado no existe. Tu cuenta se creará sin vinculación profesional.");
+          // Si el código está mal, avisamos (opcionalmente podríamos bloquear el registro)
+          alert("⚠️ El código ingresado no existe. Tu cuenta se creará como independiente (Autorizada).");
         }
       }
 
-      // 2. GUARDAR PERFIL DEL PACIENTE
+      // 2. GUARDAR PERFIL DEL PACIENTE EN FIRESTORE
       await setDoc(doc(db, "patients", uid), {
         uid: uid,
         fullName: formData.fullName,
@@ -70,8 +79,10 @@ export default function PatientRegister() {
         contactNumber: formData.phone,
         email: email,
         
+        // Datos de vinculación calculados arriba
         careTeam: initialCareTeam,
         linkedProfessionalCode: linkedProfessionalCode,
+        isAuthorized: isAuthorizedValue, // <--- CAMPO CLAVE
 
         gamificationProfile: {
           ...INITIAL_PLAYER_PROFILE,
@@ -81,7 +92,7 @@ export default function PatientRegister() {
         createdAt: new Date()
       });
 
-      // 3. ACTUALIZAR USUARIO CENTRAL
+      // 3. ACTUALIZAR USUARIO CENTRAL (Para que App.tsx sepa que ya terminó el registro)
       await updateDoc(doc(db, "users", uid), {
         role: 'patient',
         fullName: formData.fullName,    
@@ -89,7 +100,7 @@ export default function PatientRegister() {
         updatedAt: new Date()
       });
 
-      // Recargar para entrar al Dashboard
+      // Recargar la página para que App.tsx evalúe si entra al Dashboard o a la Pantalla de Espera
       window.location.reload();
 
     } catch (error) {
@@ -125,7 +136,7 @@ export default function PatientRegister() {
 
         <div style={{ backgroundColor: '#E3F2FD', padding: '15px', borderRadius: '8px', border:'1px solid #90CAF9' }}>
           <label style={{fontWeight:'bold', display:'block', marginBottom:'5px', color:'#1565C0'}}>¿Tienes un Código de Invitación?</label>
-          <small style={{display:'block', marginBottom:'8px', color:'#555'}}>Si tu profesional te dio un código, ingrésalo aquí para conectarte automáticamente.</small>
+          <small style={{display:'block', marginBottom:'8px', color:'#555'}}>Si tu profesional te dio un código, ingrésalo aquí.</small>
           <input 
             type="text" 
             name="code" 
@@ -134,6 +145,7 @@ export default function PatientRegister() {
             onChange={handleChange} 
             style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #1565C0', fontWeight:'bold', textAlign:'center', textTransform:'uppercase' }} 
           />
+          <small style={{display:'block', marginTop:'5px', color:'#d32f2f', fontSize:'11px'}}>* Al usar código, tu cuenta quedará pendiente de aprobación.</small>
         </div>
 
         <button 
@@ -149,7 +161,7 @@ export default function PatientRegister() {
 
       </form>
 
-      {/* --- BOTÓN DE SALIR --- */}
+      {/* BOTÓN DE SALIR */}
       <div style={{marginTop: '25px', textAlign: 'center', borderTop: '1px solid #eee', paddingTop: '15px'}}>
         <button 
           onClick={() => auth.signOut()} 
