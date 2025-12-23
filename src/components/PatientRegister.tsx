@@ -30,7 +30,7 @@ export default function PatientRegister() {
     try {
       // 1. LÓGICA DE VINCULACIÓN (Solo si escribió código)
       let initialCareTeam = {};
-      let linkedProfessionalId = null; 
+      // CORRECCIÓN: Eliminamos la variable linkedProfessionalId que no se usaba
       let linkedProfessionalCode = null;
 
       if (formData.code.trim()) {
@@ -45,7 +45,6 @@ export default function PatientRegister() {
           const profData = profDoc.data();
           const profId = profDoc.id;
           
-          linkedProfessionalId = profId;
           linkedProfessionalCode = cleanCode;
 
           const professionType = profData.professionType || 'general';
@@ -82,7 +81,7 @@ export default function PatientRegister() {
         createdAt: new Date()
       });
 
-      // 3. ACTUALIZAR USUARIO CENTRAL (CRÍTICO PARA ENTRAR AL DASHBOARD)
+      // 3. ACTUALIZAR USUARIO CENTRAL
       await updateDoc(doc(db, "users", uid), {
         role: 'patient',
         fullName: formData.fullName,    
@@ -150,7 +149,7 @@ export default function PatientRegister() {
 
       </form>
 
-      {/* --- BOTÓN DE SALIR AGREGADO --- */}
+      {/* --- BOTÓN DE SALIR --- */}
       <div style={{marginTop: '25px', textAlign: 'center', borderTop: '1px solid #eee', paddingTop: '15px'}}>
         <button 
           onClick={() => auth.signOut()} 
