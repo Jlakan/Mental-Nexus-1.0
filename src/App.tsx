@@ -151,5 +151,34 @@ export default function App() {
     );
   }
 
-  return <div>Rol desconocido.</div>;
+  // ... resto del código ...
+
+  // REEMPLAZA EL FINAL "return <div>Rol desconocido.</div>;" POR ESTO:
+  return (
+    <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>
+      <h1 style={{color: '#D32F2F'}}>⚠️ Rol Desconocido</h1>
+      <p>Tu usuario tiene guardado el rol: <strong>"{userData?.role || 'Ninguno'}"</strong></p>
+      <p>El sistema no reconoce este rol. Pulsa el botón para volver a elegir.</p>
+      
+      <button 
+        onClick={async () => {
+          await setDoc(doc(db, "users", user.uid), { role: null }, { merge: true });
+          window.location.reload();
+        }}
+        style={{ 
+          marginTop: '20px', padding: '15px 30px', background: '#2196F3', 
+          color: 'white', border: 'none', borderRadius: '8px', 
+          fontSize: '16px', cursor: 'pointer', fontWeight: 'bold' 
+        }}
+      >
+        🔄 Restablecer y Elegir Rol Nuevamente
+      </button>
+      
+      <div style={{marginTop: '30px'}}>
+        <button onClick={() => auth.signOut()} style={{textDecoration:'underline', border:'none', background:'none', cursor:'pointer', color:'#666'}}>
+          Cerrar Sesión
+        </button>
+      </div>
+    </div>
+  );
 }
