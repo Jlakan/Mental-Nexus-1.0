@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { WorkConfig, DaySchedule, TimeRange } from '../utils/agendaTypes';
+// CORRECCIÓN: Quitamos DaySchedule del import
+import type { WorkConfig, TimeRange } from '../utils/agendaTypes';
 
 interface Props {
   isOpen: boolean;
@@ -11,7 +12,6 @@ interface Props {
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 export default function AgendaConfigModal({ isOpen, onClose, currentConfig, onSave }: Props) {
-  // Estado local para editar sin afectar al padre hasta guardar
   const [config, setConfig] = useState<WorkConfig>(JSON.parse(JSON.stringify(currentConfig)));
 
   if (!isOpen) return null;
@@ -19,7 +19,6 @@ export default function AgendaConfigModal({ isOpen, onClose, currentConfig, onSa
   const handleDayToggle = (dayIndex: number) => {
     const newSchedule = { ...config.schedule };
     if (!newSchedule[dayIndex]) {
-        // Si no existía, lo inicializamos
         newSchedule[dayIndex] = { active: true, ranges: [{ start: '09:00', end: '14:00' }] };
     } else {
         newSchedule[dayIndex] = { 
@@ -52,16 +51,12 @@ export default function AgendaConfigModal({ isOpen, onClose, currentConfig, onSa
     <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:50}}>
       <div style={{background:'white', width:'600px', maxHeight:'90vh', borderRadius:'12px', display:'flex', flexDirection:'column', boxShadow:'0 10px 25px rgba(0,0,0,0.2)'}}>
         
-        {/* HEADER */}
         <div style={{padding:'20px', borderBottom:'1px solid #eee'}}>
             <h2 style={{margin:0}}>⚙️ Configuración de Horarios</h2>
-            <p style={{margin:'5px 0 0 0', color:'#666', fontSize:'13px'}}>Define tu semana tipo. Esto se usará al generar nuevos meses.</p>
+            <p style={{margin:'5px 0 0 0', color:'#666', fontSize:'13px'}}>Define tu semana tipo.</p>
         </div>
 
-        {/* BODY SCROLLABLE */}
         <div style={{flex:1, overflowY:'auto', padding:'20px'}}>
-            
-            {/* GLOBALES */}
             <div style={{display:'flex', gap:'20px', marginBottom:'20px', background:'#F5F5F5', padding:'15px', borderRadius:'8px'}}>
                 <div style={{flex:1}}>
                     <label style={{display:'block', fontSize:'12px', fontWeight:'bold'}}>Duración Sesión (min):</label>
@@ -83,11 +78,9 @@ export default function AgendaConfigModal({ isOpen, onClose, currentConfig, onSa
                 </div>
             </div>
 
-            {/* DÍAS */}
             <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
                 {DAYS.map((dayName, index) => {
                     const dayData = config.schedule[index] || { active: false, ranges: [] };
-                    
                     return (
                         <div key={index} style={{border:'1px solid #eee', borderRadius:'8px', padding:'10px', opacity: dayData.active ? 1 : 0.6}}>
                             <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: dayData.active ? '10px' : '0'}}>
@@ -135,15 +128,12 @@ export default function AgendaConfigModal({ isOpen, onClose, currentConfig, onSa
                     );
                 })}
             </div>
-
         </div>
 
-        {/* FOOTER */}
         <div style={{padding:'20px', borderTop:'1px solid #eee', textAlign:'right', display:'flex', gap:'10px', justifyContent:'flex-end'}}>
             <button onClick={onClose} style={{padding:'10px 20px', background:'#eee', border:'none', borderRadius:'6px', cursor:'pointer'}}>Cancelar</button>
             <button onClick={() => onSave(config)} style={{padding:'10px 20px', background:'#2196F3', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>Guardar Configuración</button>
         </div>
-
       </div>
     </div>
   );

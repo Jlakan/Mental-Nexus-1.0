@@ -47,32 +47,25 @@ const getCalendarGrid = (date: Date) => {
 };
 
 export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
-  // --- CONTEXTO ---
   const [myProfessionals, setMyProfessionals] = useState<any[]>([]);
   const [selectedProfId, setSelectedProfId] = useState<string>('');
   
-  // --- DATOS AGENDA ---
   const [currentMonthData, setCurrentMonthData] = useState<MonthlySlotMap | null>(null);
   const [isMonthInitialized, setIsMonthInitialized] = useState(false);
   const [patients, setPatients] = useState<any[]>([]);
   
-  // --- SEGUIMIENTO / RETENCIÓN ---
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
   const [preSelectedPatient, setPreSelectedPatient] = useState<{id: string, name: string} | null>(null);
   
-  // --- CONFIGURACIÓN ---
   const [workConfig, setWorkConfig] = useState<WorkConfig>(DEFAULT_CONFIG);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   
-  // --- UI STATE ---
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
 
-  // --- MODALES ---
   const [isDayViewOpen, setIsDayViewOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   
-  // --- FORMULARIO ---
   const [targetSlotKey, setTargetSlotKey] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     patientId: '',
@@ -92,7 +85,8 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
       try {
         if (userRole === 'professional') {
           const docSnap = await getDoc(doc(db, "professionals", currentUserId));
-          const selfData = { id: currentUserId, ...docSnap.data() };
+          // CORRECCIÓN: Usamos 'as any' para evitar error TS2339 con agendaSettings
+          const selfData = { id: currentUserId, ...docSnap.data() } as any;
           
           if (selfData.agendaSettings) setWorkConfig(selfData.agendaSettings);
           setMyProfessionals([selfData]);
@@ -100,7 +94,8 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
         } else {
           const q = query(collection(db, "professionals"), where("authorizedAssistants", "array-contains", currentUserId));
           const snap = await getDocs(q);
-          const pros = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          // CORRECCIÓN: Usamos 'as any' aquí también
+          const pros = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
           setMyProfessionals(pros);
           if (pros.length > 0) {
              setSelectedProfId(pros[0].id);
@@ -152,7 +147,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
     }
   };
 
-  // --- LÓGICA DE DETECCIÓN DE "FALTANTES" ---
   const calculatePendingPatients = (allPatients: any[]) => {
     const now = new Date();
     now.setHours(0,0,0,0);
@@ -161,7 +155,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
         const careData = p.careTeam?.[selectedProfId];
         if (!careData) return true;
         if (careData.status === 'discharged') return false;
-
         if (!careData.nextAppointment) return true;
         
         const nextDate = new Date(careData.nextAppointment);
@@ -171,7 +164,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
     setPendingPatients(pending);
   };
 
-  // 3. INICIALIZAR MES
   const handleInitializeMonth = async () => {
     if (!window.confirm(`¿Generar agenda?`)) return;
     setLoading(true);
@@ -190,7 +182,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // 4. REGENERAR MES
   const handleRegenerateMonth = async () => {
     if (!currentMonthData) return;
     if (!window.confirm("⚠️ ¿Actualizar horarios?\n\nTUS CITAS YA AGENDADAS SE RESPETARÁN.")) return;
@@ -212,7 +203,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // 5. BLOQUEAR DÍA
   const handleBlockDay = async () => {
     if (!currentMonthData) return;
     const reason = window.prompt("¿Motivo del bloqueo?");
@@ -247,7 +237,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // 6. GUARDAR CONFIGURACIÓN
   const handleSaveConfig = async (newConfig: WorkConfig) => {
     setLoading(true);
     try {
@@ -257,7 +246,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // 7. GUARDAR CITA
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetSlotKey || !currentMonthData) return;
@@ -322,7 +310,8 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
       if (formData.patientId) {
         const updatedPatients = patients.map(p => {
             if (p.id === formData.patientId) {
-                const newCareTeam = { ...p.careTeam } || {};
+                // CORRECCIÓN: Quitamos el '|| {}' para evitar el error TS2872
+                const newCareTeam = { ...p.careTeam };
                 if (!newCareTeam[selectedProfId]) newCareTeam[selectedProfId] = {};
                 newCareTeam[selectedProfId] = {
                     ...newCareTeam[selectedProfId],
@@ -342,37 +331,21 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
     } catch (e) { console.error(e); alert("Error guardando."); } finally { setLoading(false); }
   };
 
-  // 8. CANCELAR / LIBERAR SLOT (AQUÍ ESTÁ EL CAMBIO IMPORTANTE)
   const handleCancelSlot = async (slotKey: string) => {
     if (!window.confirm("¿Liberar este espacio?")) return;
     try {
         const year = selectedDate.getFullYear();
         const month = selectedDate.getMonth();
         const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-        
-        // 1. Obtenemos datos del slot antes de borrarlo
         const slotOriginal = currentMonthData![slotKey];
-        
-        const resetSlot: AgendaSlot = {
-            status: 'available',
-            time: slotOriginal.time,
-            duration: slotOriginal.duration,
-            price: workConfig.defaultPrice 
-        };
+        const resetSlot: AgendaSlot = { status: 'available', time: slotOriginal.time, duration: slotOriginal.duration, price: workConfig.defaultPrice };
 
         const batch = writeBatch(db);
-
-        // 2. Actualizamos la agenda (borrar cita)
         const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
         batch.update(agendaRef, { [`slots.${slotKey}`]: resetSlot });
 
-        // 3. ACTUALIZAR AL PACIENTE: Borrar 'nextAppointment'
         if (slotOriginal.patientId) {
             const patientRef = doc(db, "patients", slotOriginal.patientId);
-            // Establecemos nextAppointment como null para que vuelva a aparecer en la lista
-            // NOTA: Esto asume que borras su única cita futura. 
-            // Si el paciente tiene OTRA cita futura además de esta, aquí habría que buscarla.
-            // Para simplificar, lo marcamos como null para que el asistente revise.
             const cancelUpdate = {
                 [`careTeam.${selectedProfId}.nextAppointment`]: null,
                 [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString()
@@ -382,28 +355,27 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
 
         await batch.commit();
 
-        // 4. Actualización Visual (Optimista)
         setCurrentMonthData({ ...currentMonthData!, [slotKey]: resetSlot });
 
         if (slotOriginal.patientId) {
             const updatedPatients = patients.map(p => {
                 if (p.id === slotOriginal.patientId) {
-                    const newCareTeam = { ...p.careTeam } || {};
+                    // CORRECCIÓN: Quitamos el '|| {}' para evitar el error TS2872
+                    const newCareTeam = { ...p.careTeam };
                     if (newCareTeam[selectedProfId]) {
-                        newCareTeam[selectedProfId].nextAppointment = null; // Borramos la fecha visualmente
+                        newCareTeam[selectedProfId].nextAppointment = null; 
                     }
                     return { ...p, careTeam: newCareTeam };
                 }
                 return p;
             });
             setPatients(updatedPatients);
-            calculatePendingPatients(updatedPatients); // Esto hará que reaparezca en la lista roja
+            calculatePendingPatients(updatedPatients);
         }
 
     } catch(e) { console.error(e); }
   };
 
-  // --- UI HELPERS ---
   const openForm = (slotKey: string, slot: AgendaSlot) => {
     setTargetSlotKey(slotKey);
     const initialPatientId = slot.patientId || (preSelectedPatient?.id || '');
@@ -423,7 +395,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
     setIsFormOpen(true);
   };
 
-  // --- RENDER DÍA ---
   const renderDaySlots = () => {
     if (!currentMonthData) return <div>Cargando...</div>;
     const prefix = `${selectedDate.getDate().toString().padStart(2, '0')}_`;
@@ -473,7 +444,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'sans-serif', background:'#f5f5f5' }}>
       
-      {/* --- SIDEBAR --- */}
       <div style={{ width: '280px', background: 'white', borderRight: '1px solid #ddd', display:'flex', flexDirection:'column' }}>
          <div style={{padding:'20px', borderBottom:'1px solid #eee'}}>
              <h3 style={{marginTop:0}}>Opciones</h3>
@@ -486,7 +456,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
              )}
          </div>
 
-         {/* --- LISTA DE PENDIENTES --- */}
          <div style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden'}}>
             <div style={{padding:'10px 20px', background:'#FFEBEE', color:'#C62828', borderBottom:'1px solid #FFCDD2'}}>
                 <strong>📉 Sin Cita Futura ({pendingPatients.length})</strong>
@@ -518,7 +487,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
          </div>
       </div>
 
-      {/* --- CALENDARIO PRINCIPAL --- */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '20px', background: 'white', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid #eee' }}>
             <div style={{display:'flex', gap:'20px', alignItems:'center'}}>
@@ -549,7 +517,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
         </div>
       </div>
 
-      {/* MODAL DÍA */}
       {isDayViewOpen && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'end', zIndex:10}}>
             <div style={{width:'400px', background:'white', height:'100%', padding:'20px', display:'flex', flexDirection:'column'}}>
@@ -566,7 +533,6 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
         </div>
       )}
 
-      {/* MODAL FORMULARIO */}
       {isFormOpen && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:20}}>
             <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'400px'}}>
