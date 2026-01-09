@@ -1,7 +1,8 @@
 // src/App.tsx
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore'; // Agregamos onSnapshot
+// CORRECCIÓN: Quitamos 'getDoc' de aquí porque ya no lo usamos
+import { doc, setDoc, onSnapshot } from 'firebase/firestore'; 
 import { auth, db } from './services/firebase';
 
 // Importamos todos los componentes
@@ -39,7 +40,7 @@ export default function App() {
       
       if (currentUser) {
         // 1. ESCUCHAR EN TIEMPO REAL LA COLECCIÓN 'USERS'
-        // Usamos onSnapshot en vez de getDoc para detectar cambios de ROL al instante
+        // Usamos onSnapshot para detectar cambios de ROL al instante
         const unsubscribeUser = onSnapshot(doc(db, "users", currentUser.uid), (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
@@ -65,7 +66,7 @@ export default function App() {
           setLoading(false);
         });
 
-        // Cleanup del listener de usuario si el componente se desmonta (raro en App)
+        // Cleanup del listener
         return () => unsubscribeUser();
 
       } else {
@@ -188,7 +189,7 @@ export default function App() {
       <button
         onClick={async () => {
           await setDoc(doc(db, "users", user.uid), { role: null }, { merge: true });
-          // No necesitamos reload, el onSnapshot detectará el cambio a role: null
+          // No necesitamos reload, el onSnapshot detectará el cambio
         }}
         style={{
           marginTop: '20px', padding: '15px 30px', background: '#2196F3',
