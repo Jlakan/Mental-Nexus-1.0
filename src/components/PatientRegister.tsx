@@ -27,17 +27,15 @@ export default function PatientRegister() {
     const email = auth.currentUser.email;
 
     try {
-      // 1. LÓGICA DE VINCULACIÓN Y AUTORIZACIÓN
+      // 1. PREPARAR DATOS DE VINCULACIÓN
       let initialCareTeam = {};
       let linkedProfessionalCode = null;
-      
-      // POR DEFECTO: Si no hay código, el paciente es libre (autorizado)
-      let isAuthorizedValue = true;
+      let isAuthorizedValue = true; // Por defecto autorizado si no usa código
 
       if (formData.code.trim()) {
         const cleanCode = formData.code.trim().toUpperCase();
 
-        // Buscamos al profesional dueño de ese código
+        // Buscar profesional por código
         const q = query(collection(db, "professionals"), where("professionalCode", "==", cleanCode));
         const docSnap = await getDocs(q);
 
@@ -46,32 +44,29 @@ export default function PatientRegister() {
           const profData = profDoc.data();
           const profId = profDoc.id;
           
-          // Obtenemos el tipo como dato informativo
           const professionType = profData.professionType || 'psicologo';
 
           linkedProfessionalCode = cleanCode;
-          
-          // Al usar código, requiere aprobación del profesional
-          isAuthorizedValue = false; 
+          isAuthorizedValue = false; // Requiere aprobación si usa código
 
           // ---------------------------------------------------------
-          // ESTRUCTURA CORREGIDA (PLANA) - CRÍTICO PARA LA AGENDA
+          // ESTRUCTURA PLANA (Para que funcione la Agenda y Listas)
           // ---------------------------------------------------------
           initialCareTeam = {
             [profId]: {
-              // DATOS PRINCIPALES (Nivel raíz para que el filtro de Agenda funcione)
-              status: 'active',                  // <--- 'active' para que aparezca YA en la lista
-              active: true,                      // Flag auxiliar
-              nextAppointment: null,             // <--- null asegura que aparezca en "Sin Cita"
-              
-              // Datos informativos
+              // Variables de estado para filtros
+              status: 'active',           // Esencial para que aparezca en la lista
+              active: true,               // Flag booleano de respaldo
+              nextAppointment: null,      // Null = Aparece en "Sin Cita"
+
+              // Datos informativos del profesional
               joinedAt: new Date().toISOString(),
               professionalName: profData.fullName,
               professionalId: profId,
-              professionType: professionType,    // El rol se guarda como propiedad interna
+              professionType: professionType,
               contactNumber: formData.phone,
               
-              // Inicialización de contadores y precios
+              // Datos financieros y estadísticas
               noShowCount: 0,
               customPrice: profData.agendaSettings?.defaultPrice || 500
             }
@@ -85,7 +80,7 @@ export default function PatientRegister() {
         }
       }
 
-      // 2. CREAR DOCUMENTO DEL PACIENTE
+      // 2. GUARDAR DOCUMENTO DEL PACIENTE
       await setDoc(doc(db, "patients", uid), {
         uid: uid,
         fullName: formData.fullName,
@@ -94,23 +89,19 @@ export default function PatientRegister() {
         contactNumber: formData.phone,
         createdAt: new Date(),
         
-        // Perfil de Gamificación Inicial
         gamificationProfile: INITIAL_PLAYER_PROFILE,
         
-        // Datos de Vinculación
         careTeam: initialCareTeam,
         linkedProfessionalCode: linkedProfessionalCode,
         isAuthorized: isAuthorizedValue,
 
-        // Flag para identificar origen
         isManual: false 
       });
 
-      // 3. REDIRECCIÓN FINAL (MODIFICADO)
-      // Forzamos una recarga completa del navegador.
-      // Esto hará que App.tsx se ejecute de cero, detecte que el usuario
-      // ya tiene documento en "patients" y muestre el Dashboard.
-      window.location.reload();
+      // 3. REDIRECCIÓN SEGURA
+      // Usamos href en lugar de reload para obligar a ir a la raíz ('/').
+      // Esto asegura que salgamos de la ruta '/register' o '/patient-register'.
+      window.location.href = '/';
 
     } catch (error: any) {
       console.error("Error al registrar:", error);
