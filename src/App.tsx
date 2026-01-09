@@ -1,7 +1,7 @@
 // src/App.tsx
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore'; // Agregamos onSnapshot
 import { auth, db } from './services/firebase';
 
 // Importamos todos los componentes
@@ -19,40 +19,65 @@ import AgendaView from './components/AgendaView';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
+  
+  // userData: Datos de la colección 'users' (rol, email, etc.)
   const [userData, setUserData] = useState<any>(null);
+  
+  // patientProfile: Datos específicos de la colección 'patients'
+  const [patientProfile, setPatientProfile] = useState<any>(null);
+  
   const [loading, setLoading] = useState(true);
+
   // Modos de vista
   const [adminViewMode, setAdminViewMode] = useState<'admin' | 'professional'>('admin');
   const [assistantMode, setAssistantMode] = useState<'agenda' | 'register'>('agenda');
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    // Escucha cambios en la autenticación (Login/Logout)
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      
       if (currentUser) {
-        await fetchUserRole(currentUser.uid);
+        // 1. ESCUCHAR EN TIEMPO REAL LA COLECCIÓN 'USERS'
+        // Usamos onSnapshot en vez de getDoc para detectar cambios de ROL al instante
+        const unsubscribeUser = onSnapshot(doc(db, "users", currentUser.uid), (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setUserData(data);
+
+            // 2. SI ES PACIENTE, ESCUCHAR TAMBIÉN LA COLECCIÓN 'PATIENTS'
+            // Esto es crítico: App.tsx debe saber si ya existe el perfil médico
+            if (data.role === 'patient') {
+              onSnapshot(doc(db, "patients", currentUser.uid), (patientSnap) => {
+                if (patientSnap.exists()) {
+                  setPatientProfile(patientSnap.data());
+                } else {
+                  setPatientProfile(null);
+                }
+              });
+            }
+          } else {
+            setUserData(null);
+          }
+          setLoading(false); // Datos cargados
+        }, (error) => {
+          console.error("Error escuchando usuario:", error);
+          setLoading(false);
+        });
+
+        // Cleanup del listener de usuario si el componente se desmonta (raro en App)
+        return () => unsubscribeUser();
+
       } else {
+        // Usuario deslogueado
         setUserData(null);
+        setPatientProfile(null);
         setLoading(false);
       }
     });
-    return () => unsubscribe();
-  }, []);
 
-  const fetchUserRole = async (uid: string) => {
-    try {
-      const docRef = doc(db, "users", uid);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setUserData(docSnap.data());
-      } else {
-        setUserData(null);
-      }
-    } catch (error) {
-      console.error("Error cargando usuario:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    return () => unsubscribeAuth();
+  }, []);
 
   const handleRoleSelect = async (selectedRole: 'patient' | 'professional' | 'assistant') => {
     if (!user) return;
@@ -64,7 +89,7 @@ export default function App() {
         role: selectedRole,
         createdAt: new Date()
       }, { merge: true });
-      window.location.reload();
+      // No necesitamos reload() porque onSnapshot detectará el cambio y actualizará la UI
     } catch (error) {
       console.error("Error guardando el rol:", error);
       alert("Hubo un error al guardar tu selección.");
@@ -111,9 +136,11 @@ export default function App() {
     return <ProfessionalDashboard user={user} />;
   }
 
-  // --- ROL PACIENTE ---
+  // --- ROL PACIENTE (CORREGIDO) ---
   if (userData.role === 'patient') {
-    if (userData.fullName || userData.profileCompleted) {
+    // AHORA VERIFICAMOS SI EXISTE EL PERFIL EN LA COLECCIÓN 'PATIENTS'
+    // patientProfile se llena automáticamente gracias al onSnapshot de arriba
+    if (patientProfile) {
       return <PatientDashboard user={user} />;
     } else {
       return <PatientRegister />;
@@ -142,7 +169,7 @@ export default function App() {
           <AgendaView
             userRole="assistant"
             currentUserId={user.uid}
-            onBack={() => auth.signOut()} // Salir cierra sesión
+            onBack={() => auth.signOut()}
           />
         ) : (
           <AssistantRegister />
@@ -151,29 +178,27 @@ export default function App() {
     );
   }
 
-  // ... resto del código ...
-
-  // REEMPLAZA EL FINAL "return <div>Rol desconocido.</div>;" POR ESTO:
+  // --- ROL DESCONOCIDO ---
   return (
     <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>
       <h1 style={{color: '#D32F2F'}}>⚠️ Rol Desconocido</h1>
       <p>Tu usuario tiene guardado el rol: <strong>"{userData?.role || 'Ninguno'}"</strong></p>
       <p>El sistema no reconoce este rol. Pulsa el botón para volver a elegir.</p>
-      
-      <button 
+
+      <button
         onClick={async () => {
           await setDoc(doc(db, "users", user.uid), { role: null }, { merge: true });
-          window.location.reload();
+          // No necesitamos reload, el onSnapshot detectará el cambio a role: null
         }}
-        style={{ 
-          marginTop: '20px', padding: '15px 30px', background: '#2196F3', 
-          color: 'white', border: 'none', borderRadius: '8px', 
-          fontSize: '16px', cursor: 'pointer', fontWeight: 'bold' 
+        style={{
+          marginTop: '20px', padding: '15px 30px', background: '#2196F3',
+          color: 'white', border: 'none', borderRadius: '8px',
+          fontSize: '16px', cursor: 'pointer', fontWeight: 'bold'
         }}
       >
         🔄 Restablecer y Elegir Rol Nuevamente
       </button>
-      
+
       <div style={{marginTop: '30px'}}>
         <button onClick={() => auth.signOut()} style={{textDecoration:'underline', border:'none', background:'none', cursor:'pointer', color:'#666'}}>
           Cerrar Sesión
