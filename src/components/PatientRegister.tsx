@@ -1,6 +1,5 @@
-// src/components/PatientRegister.tsx
 import React, { useState } from 'react';
-import { doc, setDoc, updateDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db } from '../services/firebase';
 import { INITIAL_PLAYER_PROFILE } from '../utils/GamificationUtils';
 
@@ -9,7 +8,7 @@ export default function PatientRegister() {
     fullName: '',
     dob: '',
     phone: '',
-    code: '' 
+    code: ''
   });
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -33,127 +32,171 @@ export default function PatientRegister() {
       let linkedProfessionalCode = null;
       
       // POR DEFECTO: Si no hay código, el paciente es libre (autorizado)
-      let isAuthorizedValue = true; 
+      let isAuthorizedValue = true;
 
       if (formData.code.trim()) {
         const cleanCode = formData.code.trim().toUpperCase();
 
         // Buscamos al profesional dueño de ese código
         const q = query(collection(db, "professionals"), where("professionalCode", "==", cleanCode));
-        const querySnapshot = await getDocs(q);
+        const docSnap = await getDocs(q);
 
-        if (!querySnapshot.empty) {
-          const profDoc = querySnapshot.docs[0];
+        if (!docSnap.empty) {
+          const profDoc = docSnap.docs[0];
           const profData = profDoc.data();
           const profId = profDoc.id;
           
+          // Obtenemos el tipo pero solo como dato informativo
+          const professionType = profData.professionType || 'psicologo';
+
           linkedProfessionalCode = cleanCode;
+          
+          // Al usar código, requiere aprobación del profesional (aunque lo ponemos active para visibilidad inmediata)
+          // Si prefieres que NO aparezca hasta que tú apruebes, cambia 'active' por 'pending_approval'
+          // Pero para que salga en "Sin Cita" hoy mismo, debe ser 'active'.
+          isAuthorizedValue = false; 
 
-          // ⚠️ REGLA DE NEGOCIO: Si se vincula con código, requiere aprobación.
-          isAuthorizedValue = false;
-
-          const professionType = profData.professionType || 'general';
-
+          // ---------------------------------------------------------
+          // ESTRUCTURA CORREGIDA (PLANA)
+          // ---------------------------------------------------------
           initialCareTeam = {
-            [professionType]: {
-              professionalId: profId,
-              professionalName: profData.fullName,
-              joinedAt: new Date().toISOString(),
+            [profId]: {
+              // DATOS PRINCIPALES (Nivel raíz para AgendaView)
+              status: 'active',                  // <--- CRÍTICO: Debe decir 'active'
+              active: true,                      // Flag auxiliar
+              nextAppointment: null,             // <--- CRÍTICO: null = "Sin Cita"
               
-              // Queda inactivo hasta que el profesional lo active en su Dashboard
-              active: false,             
-              status: 'pending_approval' 
+              // Datos informativos
+              joinedAt: new Date().toISOString(),
+              professionalName: profData.fullName,
+              professionalId: profId,
+              professionType: professionType,    // El rol se guarda como propiedad, no como carpeta
+              contactNumber: formData.phone,
+              
+              // Inicialización de contadores
+              noShowCount: 0,
+              customPrice: profData.agendaSettings?.defaultPrice || 500 // Precio base del doc
             }
           };
+          // ---------------------------------------------------------
+
         } else {
-          // Si el código está mal, avisamos (opcionalmente podríamos bloquear el registro)
-          alert("⚠️ El código ingresado no existe. Tu cuenta se creará como independiente (Autorizada).");
+          setSaving(false);
+          setErrorMsg("El código ingresado no existe. Verifica o déjalo en blanco.");
+          return;
         }
       }
 
-      // 2. GUARDAR PERFIL DEL PACIENTE EN FIRESTORE
+      // 2. CREAR DOCUMENTO DEL PACIENTE
       await setDoc(doc(db, "patients", uid), {
         uid: uid,
         fullName: formData.fullName,
+        email: email,
         dob: formData.dob,
         contactNumber: formData.phone,
-        email: email,
+        createdAt: new Date(),
         
-        // Datos de vinculación calculados arriba
+        // Perfil de Gamificación Inicial
+        gamificationProfile: INITIAL_PLAYER_PROFILE,
+        
+        // Datos de Vinculación
         careTeam: initialCareTeam,
         linkedProfessionalCode: linkedProfessionalCode,
-        isAuthorized: isAuthorizedValue, // <--- CAMPO CLAVE
+        isAuthorized: isAuthorizedValue,
 
-        gamificationProfile: {
-          ...INITIAL_PLAYER_PROFILE,
-          wallet: { gold: 0, nexus: 0 }
-        },
-
-        createdAt: new Date()
+        // Flag para identificar origen manual vs app
+        isManual: false 
       });
 
-      // 3. ACTUALIZAR USUARIO CENTRAL (Para que App.tsx sepa que ya terminó el registro)
-      await updateDoc(doc(db, "users", uid), {
-        role: 'patient',
-        fullName: formData.fullName,    
-        profileCompleted: true,         
-        updatedAt: new Date()
-      });
-
-      // Recargar la página para que App.tsx evalúe si entra al Dashboard o a la Pantalla de Espera
+      // Recargar para entrar a la app
       window.location.reload();
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al registrar:", error);
-      setErrorMsg("Error técnico al crear perfil. Intenta de nuevo.");
+      setErrorMsg("Error al guardar datos: " + error.message);
       setSaving(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: '450px', margin: '50px auto', fontFamily: 'sans-serif', padding:'20px', border:'1px solid #ddd', borderRadius:'8px', background:'white' }}>
-      <h2 style={{textAlign:'center', color:'#2E7D32'}}>Registro de Aventurero</h2>
-      <p style={{textAlign:'center', color:'#666'}}>Comienza tu viaje hacia el bienestar.</p>
+    <div style={{
+      maxWidth: '400px', margin: '50px auto', padding: '30px',
+      borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+      backgroundColor: 'white', fontFamily: 'sans-serif'
+    }}>
+      <h2 style={{textAlign: 'center', color: '#2E7D32', marginBottom:'10px'}}>¡Bienvenido!</h2>
+      <p style={{textAlign:'center', color:'#666', fontSize:'14px', marginBottom:'20px'}}>
+        Completa tu perfil de héroe para comenzar.
+      </p>
 
-      {errorMsg && <p style={{background:'#ffebee', color:'#c62828', padding:'10px', borderRadius:'4px'}}>{errorMsg}</p>}
+      {errorMsg && (
+        <div style={{
+          backgroundColor: '#ffebee', color: '#c62828', padding: '10px',
+          borderRadius: '6px', marginBottom: '15px', fontSize: '13px', textAlign:'center'
+        }}>
+          {errorMsg}
+        </div>
+      )}
 
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+      <form onSubmit={handleSubmit} style={{display: 'flex', flexDirection: 'column', gap: '15px'}}>
         
         <div>
-          <label style={{fontWeight:'bold', display:'block', marginBottom:'5px'}}>Nombre Completo:</label>
-          <input type="text" name="fullName" required value={formData.fullName} onChange={handleChange} style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }} />
+          <label style={{display:'block', marginBottom:'5px', fontWeight:'bold', fontSize:'13px', color:'#333'}}>Nombre Completo</label>
+          <input
+            type="text"
+            name="fullName"
+            required
+            value={formData.fullName}
+            onChange={handleChange}
+            style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }}
+          />
         </div>
 
         <div>
-          <label style={{fontWeight:'bold', display:'block', marginBottom:'5px'}}>Fecha de Nacimiento:</label>
-          <input type="date" name="dob" required value={formData.dob} onChange={handleChange} style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }} />
+          <label style={{display:'block', marginBottom:'5px', fontWeight:'bold', fontSize:'13px', color:'#333'}}>Fecha de Nacimiento</label>
+          <input
+            type="date"
+            name="dob"
+            required
+            value={formData.dob}
+            onChange={handleChange}
+            style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }}
+          />
         </div>
 
         <div>
-          <label style={{fontWeight:'bold', display:'block', marginBottom:'5px'}}>Celular:</label>
-          <input type="tel" name="phone" required placeholder="55 1234 5678" value={formData.phone} onChange={handleChange} style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }} />
+          <label style={{display:'block', marginBottom:'5px', fontWeight:'bold', fontSize:'13px', color:'#333'}}>Teléfono (WhatsApp)</label>
+          <input
+            type="tel"
+            name="phone"
+            required
+            placeholder="Para notificaciones de citas"
+            value={formData.phone}
+            onChange={handleChange}
+            style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }}
+          />
         </div>
 
-        <div style={{ backgroundColor: '#E3F2FD', padding: '15px', borderRadius: '8px', border:'1px solid #90CAF9' }}>
-          <label style={{fontWeight:'bold', display:'block', marginBottom:'5px', color:'#1565C0'}}>¿Tienes un Código de Invitación?</label>
+        <div style={{marginTop:'10px', padding:'15px', backgroundColor:'#E3F2FD', borderRadius:'8px', border:'1px dashed #2196F3'}}>
+          <label style={{display:'block', marginBottom:'5px', fontWeight:'bold', fontSize:'13px', color:'#1565C0'}}>Código de Vinculación (Opcional)</label>
           <small style={{display:'block', marginBottom:'8px', color:'#555'}}>Si tu profesional te dio un código, ingrésalo aquí.</small>
-          <input 
-            type="text" 
-            name="code" 
-            placeholder="Ej: A1B2C3 (Opcional)" 
-            value={formData.code} 
-            onChange={handleChange} 
-            style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #1565C0', fontWeight:'bold', textAlign:'center', textTransform:'uppercase' }} 
+          <input
+            type="text"
+            name="code"
+            placeholder="Ej: A1B2C3 (Opcional)"
+            value={formData.code}
+            onChange={handleChange}
+            style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #1565C0', fontWeight:'bold', textAlign:'center', textTransform:'uppercase' }}
           />
           <small style={{display:'block', marginTop:'5px', color:'#d32f2f', fontSize:'11px'}}>* Al usar código, tu cuenta quedará pendiente de aprobación.</small>
         </div>
 
-        <button 
-          type="submit" 
+        <button
+          type="submit"
           disabled={saving}
-          style={{ 
-            marginTop: '10px', padding: '15px', fontSize: '16px', cursor: 'pointer', 
-            backgroundColor: '#2E7D32', color: 'white', border: 'none', borderRadius:'6px', fontWeight:'bold' 
+          style={{
+            marginTop: '10px', padding: '15px', fontSize: '16px', cursor: 'pointer',
+            backgroundColor: '#2E7D32', color: 'white', border: 'none', borderRadius:'6px', fontWeight:'bold'
           }}
         >
           {saving ? "Creando Perfil..." : "⚔️ Comenzar Aventura"}
@@ -161,18 +204,18 @@ export default function PatientRegister() {
 
       </form>
 
-      {/* BOTÓN DE SALIR */}
       <div style={{marginTop: '25px', textAlign: 'center', borderTop: '1px solid #eee', paddingTop: '15px'}}>
-        <button 
-          onClick={() => auth.signOut()} 
+        <button
+          onClick={() => auth.signOut()}
           style={{
-            background:'none', border:'none', color:'#d32f2f', 
-            textDecoration:'underline', cursor:'pointer', fontSize:'14px', fontWeight:'bold'
+            background:'none', border:'none', color:'#d32f2f',
+            textDecoration:'underline', cursor:'pointer', fontSize:'13px'
           }}
         >
-          Cancelar y Cerrar Sesión
+          Cancelar y Salir
         </button>
       </div>
+
     </div>
   );
 }

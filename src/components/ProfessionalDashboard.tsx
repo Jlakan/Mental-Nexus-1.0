@@ -21,11 +21,6 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [assistants, setAssistants] = useState<any[]>([]);
   const [activePatients, setActivePatients] = useState<any[]>([]);
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
-  
-  // NUEVO: Estado para pacientes pausados y toggle de visualización
-  const [pausedPatients, setPausedPatients] = useState<any[]>([]);
-  const [showPausedList, setShowPausedList] = useState(false);
-
   const [, setLoading] = useState(true);
   const [profData, setProfData] = useState<any>(null);
 
@@ -70,37 +65,27 @@ export default function ProfessionalDashboard({ user }: Props) {
 
           const pending: any[] = [];
           const active: any[] = [];
-          const paused: any[] = []; // Array local para pausados
 
           snapPats.docs.forEach(d => {
             const pData = d.data();
             const pId = d.id;
 
-            // Verificar estado en CareTeam
+            // Verificar si soy el médico activo en su CareTeam
             let isMyPatientActive = false;
-            let isMyPatientPaused = false;
-
             if (pData.careTeam) {
               const myEntry = Object.values(pData.careTeam).find((entry: any) => entry.professionalId === user.uid);
-              if (myEntry) {
-                 if ((myEntry as any).active) isMyPatientActive = true;
-                 if ((myEntry as any).status === 'paused') isMyPatientPaused = true;
-              }
+              if (myEntry && (myEntry as any).active) isMyPatientActive = true;
             }
 
-            // Lógica de clasificación actualizada
-            if (isMyPatientPaused) {
-                paused.push({ id: pId, ...pData });
-            } else if (pData.isAuthorized === false || !isMyPatientActive) {
-                pending.push({ id: pId, ...pData });
+            if (pData.isAuthorized === false || !isMyPatientActive) {
+              pending.push({ id: pId, ...pData });
             } else {
-                active.push({ id: pId, ...pData });
+              active.push({ id: pId, ...pData });
             }
           });
 
           setPendingPatients(pending);
           setActivePatients(active);
-          setPausedPatients(paused); // Actualizamos estado
         }
       }
     } catch (e) {
@@ -129,7 +114,7 @@ export default function ProfessionalDashboard({ user }: Props) {
 
     const currentBalance = profData?.nexusBalance || 0;
     if (currentBalance < 1) {
-      return alert( "❌ No tienes Nexus suficientes. Mejora tu suscripción para premiar asistencias." );
+      return alert("❌ No tienes Nexus suficientes. Mejora tu suscripción para premiar asistencias.");
     }
 
     if (!window.confirm(`¿Registrar asistencia de HOY y desbloquear asignación?\n\nCosto: 1 Nexus de tu saldo.\nPremio: +1 Nexus al paciente.`)) return;
@@ -153,17 +138,17 @@ export default function ProfessionalDashboard({ user }: Props) {
       });
 
       await batch.commit();
-      alert( "✅ Asistencia registrada. ¡Asignación desbloqueada!" );
+      alert("✅ Asistencia registrada. ¡Asignación desbloqueada!");
 
       // --- ACTUALIZACIÓN OPTIMISTA ---
-      setProfData((prev: any) => ({...prev, nexusBalance: prev.nexusBalance - 1}));
+      setProfData((prev: any) => ({ ...prev, nexusBalance: prev.nexusBalance - 1 }));
 
       setSelectedPatient((prev: any) => ({
         ...prev,
         lastAttendance: { ...prev.lastAttendance, [user.uid]: new Date() },
         gamificationProfile: {
           ...prev.gamificationProfile,
-          wallet: { ...prev.gamificationProfile.wallet, nexus: (prev.gamificationProfile.wallet.nexus||0) + 1 }
+          wallet: { ...prev.gamificationProfile.wallet, nexus: (prev.gamificationProfile.wallet.nexus || 0) + 1 }
         }
       }));
 
@@ -218,7 +203,7 @@ export default function ProfessionalDashboard({ user }: Props) {
   };
 
   const handleDeleteTask = async (taskId: string, isRoutine: boolean) => {
-    if(!window.confirm("¿Eliminar tarea?")) return;
+    if (!window.confirm("¿Eliminar tarea?")) return;
     try {
       await deleteDoc(doc(db, isRoutine ? "assigned_routines" : "assigned_missions", taskId));
       loadPatientTasks(selectedPatient.id);
@@ -266,27 +251,6 @@ export default function ProfessionalDashboard({ user }: Props) {
     } catch (e) { console.error(e); }
   };
 
-  // NUEVA FUNCIÓN: Reactivar Paciente Pausado
-  const handleReactivatePatient = async (patient: any) => {
-    if (!window.confirm(`¿Reactivar a ${patient.fullName}?`)) return;
-    try {
-        let targetKey = 'general';
-        if (patient.careTeam) {
-            const foundKey = Object.keys(patient.careTeam).find(key => patient.careTeam[key].professionalId === user.uid);
-            if (foundKey) targetKey = foundKey;
-        }
-
-        await updateDoc(doc(db, "patients", patient.id), {
-            [`careTeam.${targetKey}.active`]: true,
-            [`careTeam.${targetKey}.status`]: 'active'
-        });
-
-        alert("Paciente reactivado.");
-        loadData();
-    } catch (e) { console.error("Error al reactivar:", e); }
-  };
-
-
   const filteredPatients = activePatients.filter(p => p.fullName.toLowerCase().includes(searchTerm.toLowerCase()));
 
   // =================================================================
@@ -296,17 +260,17 @@ export default function ProfessionalDashboard({ user }: Props) {
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'sans-serif', background: '#F4F6F8' }}>
 
       {/* BARRA LATERAL IZQUIERDA */}
-      <DashboardMenu 
-        activeView={view} 
-        onNavigate={setView} 
-        onLogout={() => auth.signOut()} 
+      <DashboardMenu
+        activeView={view}
+        onNavigate={setView}
+        onLogout={() => auth.signOut()}
       />
 
       {/* ÁREA DE CONTENIDO PRINCIPAL (Derecha) */}
       <div style={{ flex: 1, padding: '30px', maxWidth: '1200px', margin: '0 auto', overflowY: 'auto' }}>
-        
+
         {/* HEADER SUPERIOR */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom:'1px solid #E0E0E0', paddingBottom:'20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom: '1px solid #E0E0E0', paddingBottom: '20px' }}>
           <div>
             <h1 style={{ margin: 0, color: '#37474F', fontSize: '24px' }}>
               {view === 'dashboard' && 'Resumen General'}
@@ -318,13 +282,13 @@ export default function ProfessionalDashboard({ user }: Props) {
             <p style={{ margin: '5px 0', color: '#78909C' }}>Dr(a). {profData?.fullName}</p>
           </div>
 
-          <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             {profData?.professionalCode && (
-              <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#1565C0', fontWeight:'bold', border:'1px solid #BBDEFB', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
+              <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#1565C0', fontWeight: 'bold', border: '1px solid #BBDEFB', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                 🔑 {profData.professionalCode}
               </span>
             )}
-            <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#00695C', fontWeight:'bold', border:'1px solid #B2DFDB', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
+            <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#00695C', fontWeight: 'bold', border: '1px solid #B2DFDB', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
               💎 {profData?.nexusBalance || 0} Nexus
             </span>
           </div>
@@ -333,19 +297,19 @@ export default function ProfessionalDashboard({ user }: Props) {
         {/* --- VISTA: AGENDA --- */}
         {view === 'agenda' ? (
           <AgendaView userRole="professional" currentUserId={user.uid} onBack={() => setView('dashboard')} />
-        
-        // --- VISTA: GESTIÓN DE PACIENTES ---
+
+          // --- VISTA: GESTIÓN DE PACIENTES ---
         ) : view === 'patients_manage' ? (
           <div>
             {/* SOLICITUDES PENDIENTES */}
             {pendingPatients.length > 0 && (
-              <div style={{marginBottom:'30px', background:'#FFF3E0', padding:'20px', borderRadius:'10px', border:'1px solid #FFE0B2'}}>
-                <h3 style={{marginTop:0, color:'#E65100'}}>🔔 Solicitudes ({pendingPatients.length})</h3>
-                <div style={{display:'grid', gap:'10px', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))'}}>
+              <div style={{ marginBottom: '30px', background: '#FFF3E0', padding: '20px', borderRadius: '10px', border: '1px solid #FFE0B2' }}>
+                <h3 style={{ marginTop: 0, color: '#E65100' }}>🔔 Solicitudes ({pendingPatients.length})</h3>
+                <div style={{ display: 'grid', gap: '10px', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
                   {pendingPatients.map(p => (
-                    <div key={p.id} style={{background:'white', padding:'15px', borderRadius:'8px', display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 2px 4px rgba(0,0,0,0.05)'}}>
-                      <div><strong>{p.fullName}</strong><div style={{fontSize:'12px', color:'#666'}}>{p.email}</div></div>
-                      <button onClick={() => handleApprovePatient(p)} style={{background:'#4CAF50', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', cursor:'pointer'}}>Aprobar</button>
+                    <div key={p.id} style={{ background: 'white', padding: '15px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                      <div><strong>{p.fullName}</strong><div style={{ fontSize: '12px', color: '#666' }}>{p.email}</div></div>
+                      <button onClick={() => handleApprovePatient(p)} style={{ background: '#4CAF50', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }}>Aprobar</button>
                     </div>
                   ))}
                 </div>
@@ -353,241 +317,276 @@ export default function ProfessionalDashboard({ user }: Props) {
             )}
 
             {/* LISTA ACTIVOS */}
-            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
-              <h3 style={{color:'#455A64', margin:0}}>Pacientes Activos ({activePatients.length})</h3>
-              <input type="text" placeholder="🔍 Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{padding:'10px', borderRadius:'6px', border:'1px solid #CFD8DC', width:'250px'}} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 style={{ color: '#455A64', margin: 0 }}>Pacientes Activos ({activePatients.length})</h3>
+              <input type="text" placeholder="🔍 Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '10px', borderRadius: '6px', border: '1px solid #CFD8DC', width: '250px' }} />
             </div>
 
-            <div style={{background:'white', borderRadius:'10px', boxShadow:'0 2px 10px rgba(0,0,0,0.03)', overflow:'hidden'}}>
-              <table style={{width:'100%', borderCollapse:'collapse'}}>
-                <thead style={{background:'#ECEFF1', color:'#455A64'}}>
+            <div style={{ background: 'white', borderRadius: '10px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead style={{ background: '#ECEFF1', color: '#455A64' }}>
                   <tr>
-                    <th style={{padding:'15px', textAlign:'left', fontSize:'13px', textTransform:'uppercase'}}>Nombre</th>
-                    <th style={{padding:'15px', textAlign:'left', fontSize:'13px', textTransform:'uppercase'}}>Contacto</th>
-                    <th style={{padding:'15px', textAlign:'center', fontSize:'13px', textTransform:'uppercase'}}>Acciones</th>
+                    <th style={{ padding: '15px', textAlign: 'left', fontSize: '13px', textTransform: 'uppercase' }}>Nombre</th>
+                    <th style={{ padding: '15px', textAlign: 'left', fontSize: '13px', textTransform: 'uppercase' }}>Contacto</th>
+                    <th style={{ padding: '15px', textAlign: 'center', fontSize: '13px', textTransform: 'uppercase' }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredPatients.map(p => (
-                    <tr key={p.id} style={{borderBottom:'1px solid #eee'}}>
-                      <td style={{padding:'15px', fontWeight:'bold', color:'#37474F'}}>{p.fullName}</td>
-                      <td style={{padding:'15px', color:'#546E7A'}}>{p.email}</td>
-                      <td style={{padding:'15px', textAlign:'center'}}>
-                        <button onClick={() => handleOpenPatient(p)} style={{padding:'6px 15px', background:'#E3F2FD', color:'#1565C0', border:'none', borderRadius:'20px', cursor:'pointer', fontWeight:'bold', fontSize:'12px'}}>
+                    <tr key={p.id} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '15px', fontWeight: 'bold', color: '#37474F' }}>{p.fullName}</td>
+                      <td style={{ padding: '15px', color: '#546E7A' }}>{p.email}</td>
+                      <td style={{ padding: '15px', textAlign: 'center' }}>
+                        <button onClick={() => handleOpenPatient(p)} style={{ padding: '6px 15px', background: '#E3F2FD', color: '#1565C0', border: 'none', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>
                           📂 Ver Expediente
                         </button>
                       </td>
                     </tr>
                   ))}
                   {filteredPatients.length === 0 && (
-                    <tr><td colSpan={3} style={{padding:'20px', textAlign:'center', color:'#999'}}>No se encontraron pacientes activos.</td></tr>
+                    <tr><td colSpan={3} style={{ padding: '20px', textAlign: 'center', color: '#999' }}>No se encontraron pacientes.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
-
-            {/* SECCIÓN NUEVA: PACIENTES PAUSADOS */}
-            <div style={{marginTop:'40px'}}>
-                <button 
-                  onClick={() => setShowPausedList(!showPausedList)}
-                  style={{
-                    background: showPausedList ? '#CFD8DC' : '#ECEFF1', 
-                    color: '#546E7A', 
-                    border: '1px solid #B0BEC5', 
-                    padding: '10px 20px', 
-                    borderRadius: '6px', 
-                    cursor: 'pointer', 
-                    fontWeight: 'bold',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px'
-                  }}
-                >
-                    {showPausedList ? '📂 Ocultar Archivo' : '📂 Ver Pacientes en Pausa'}
-                    <span style={{background:'#78909C', color:'white', padding:'2px 8px', borderRadius:'12px', fontSize:'11px'}}>
-                        {pausedPatients.length}
-                    </span>
-                </button>
-
-                {showPausedList && (
-                    <div style={{marginTop:'15px', background:'#F5F5F5', borderRadius:'10px', padding:'20px', border:'1px dashed #B0BEC5'}}>
-                        <h4 style={{marginTop:0, color:'#546E7A'}}>Pacientes Pausados / Archivo</h4>
-                        {pausedPatients.length === 0 ? (
-                            <p style={{color:'#999', fontStyle:'italic'}}>No hay pacientes en pausa.</p>
-                        ) : (
-                            <table style={{width:'100%', textAlign:'left'}}>
-                                <thead>
-                                    <tr>
-                                        <th style={{color:'#78909C', fontSize:'12px'}}>Nombre</th>
-                                        <th style={{color:'#78909C', fontSize:'12px'}}>Email</th>
-                                        <th style={{color:'#78909C', fontSize:'12px'}}>Acción</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {pausedPatients.map(p => (
-                                        <tr key={p.id} style={{borderBottom:'1px solid #E0E0E0'}}>
-                                            <td style={{padding:'10px 0', color:'#546E7A'}}>{p.fullName}</td>
-                                            <td style={{padding:'10px 0', color:'#78909C', fontSize:'13px'}}>{p.email}</td>
-                                            <td style={{padding:'10px 0'}}>
-                                                <button 
-                                                    onClick={() => handleReactivatePatient(p)}
-                                                    style={{background:'white', border:'1px solid #4CAF50', color:'#4CAF50', padding:'4px 10px', borderRadius:'4px', cursor:'pointer', fontSize:'12px', fontWeight:'bold'}}
-                                                >
-                                                    🔄 Reactivar
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
-                    </div>
-                )}
-            </div>
-
           </div>
 
-        // --- VISTA: DASHBOARD INICIAL ---
+          // --- VISTA: DASHBOARD INICIAL ---
         ) : view === 'dashboard' ? (
-          <div style={{textAlign:'center', padding:'40px'}}>
-            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'20px'}}>
-              <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #2196F3'}}>
-                <div style={{fontSize:'36px', fontWeight:'bold', color:'#2196F3', marginBottom:'5px'}}>{activePatients.length}</div>
-                <div style={{color:'#546E7A', fontWeight:'bold'}}>Pacientes Activos</div>
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px' }}>
+              <div style={{ padding: '30px', background: 'white', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', borderBottom: '4px solid #2196F3' }}>
+                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#2196F3', marginBottom: '5px' }}>{activePatients.length}</div>
+                <div style={{ color: '#546E7A', fontWeight: 'bold' }}>Pacientes Activos</div>
               </div>
-              <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #00BCD4'}}>
-                <div style={{fontSize:'36px', fontWeight:'bold', color:'#00838F', marginBottom:'5px'}}>{profData?.nexusBalance || 0}</div>
-                <div style={{color:'#546E7A', fontWeight:'bold'}}>Nexus Disponibles</div>
+              <div style={{ padding: '30px', background: 'white', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', borderBottom: '4px solid #00BCD4' }}>
+                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#00838F', marginBottom: '5px' }}>{profData?.nexusBalance || 0}</div>
+                <div style={{ color: '#546E7A', fontWeight: 'bold' }}>Nexus Disponibles</div>
               </div>
             </div>
-            <div style={{marginTop:'50px', color:'#90A4AE'}}>
+            <div style={{ marginTop: '50px', color: '#90A4AE' }}>
               <p>Selecciona una opción del menú lateral para comenzar.</p>
             </div>
           </div>
 
-        // --- VISTA: EQUIPO ---
+          // --- VISTA: EQUIPO ---
         ) : view === 'team' ? (
           <div>
             <h2>Equipo de Trabajo</h2>
-            {assistants.length === 0 ? <p style={{color:'#666'}}>No hay asistentes registrados.</p> : assistants.map(a => <div key={a.uid} style={{padding:'10px', borderBottom:'1px solid #eee'}}>{a.displayName}</div>)}
+            {assistants.length === 0 ? <p style={{ color: '#666' }}>No hay asistentes registrados.</p> : assistants.map(a => <div key={a.uid} style={{ padding: '10px', borderBottom: '1px solid #eee' }}>{a.displayName}</div>)}
           </div>
 
-        // --- VISTA: DETALLE DE PACIENTE (Ahora integrada en el layout) ---
+          // --- VISTA: DETALLE DE PACIENTE (Ahora integrada en el layout) ---
         ) : view === 'patient_detail' && selectedPatient ? (
           <div style={{ paddingBottom: '50px' }}>
-            
+
             {/* SUB-NAV VOLVER */}
-            <button onClick={() => setView('patients_manage')} style={{marginBottom:'20px', background:'none', border:'none', color:'#666', cursor:'pointer', fontSize:'14px', display:'flex', alignItems:'center', gap:'5px'}}>
+            <button onClick={() => setView('patients_manage')} style={{ marginBottom: '20px', background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '5px' }}>
               ⬅ Volver a la lista
             </button>
 
             {/* HEADER PACIENTE */}
-            <div style={{background:'white', padding:'25px', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', marginBottom:'20px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <div style={{ background: 'white', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h1 style={{margin:'0 0 5px 0', color:'#1565C0', fontSize:'22px'}}>{selectedPatient.fullName}</h1>
-                <div style={{color:'#666', fontSize:'14px'}}>
+                <h1 style={{ margin: '0 0 5px 0', color: '#1565C0', fontSize: '22px' }}>{selectedPatient.fullName}</h1>
+                <div style={{ color: '#666', fontSize: '14px' }}>
                   {selectedPatient.email} • {selectedPatient.contactNumber}
                 </div>
                 {/* STATS PACIENTE */}
-                <div style={{marginTop:'10px', display:'flex', gap:'10px'}}>
-                    <span style={{background:'#E1BEE7', color:'#4A148C', padding:'4px 10px', borderRadius:'15px', fontWeight:'bold', fontSize:'12px'}}>
-                        Nivel {selectedPatient.gamificationProfile?.level || 1}
-                    </span>
-                    <span style={{background:'#B3E5FC', color:'#0277BD', padding:'4px 10px', borderRadius:'15px', fontWeight:'bold', fontSize:'12px'}}>
-                        💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0} Nexus
-                    </span>
+                <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+                  <span style={{ background: '#E1BEE7', color: '#4A148C', padding: '4px 10px', borderRadius: '15px', fontWeight: 'bold', fontSize: '12px' }}>
+                    Nivel {selectedPatient.gamificationProfile?.level || 1}
+                  </span>
+                  <span style={{ background: '#B3E5FC', color: '#0277BD', padding: '4px 10px', borderRadius: '15px', fontWeight: 'bold', fontSize: '12px' }}>
+                    💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0} Nexus
+                  </span>
                 </div>
               </div>
 
-              <div style={{display:'flex', flexDirection:'column', gap:'10px', alignItems:'flex-end'}}>
-                <div style={{display:'flex', gap:'10px'}}>
-                    <button onClick={() => setIsHistoryOpen(true)} style={{padding:'10px 15px', background:'#607D8B', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>
-                        📜 Historial
-                    </button>
-                    {/* Botón Asignar con Lógica de Candado */}
-                    <button 
-                      onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance}
-                      style={{
-                        padding:'10px 20px', 
-                        background: hasValidAttendance(selectedPatient) ? '#2196F3' : '#E0E0E0', 
-                        color: hasValidAttendance(selectedPatient) ? 'white' : '#757575',
-                        border: hasValidAttendance(selectedPatient) ? 'none' : '1px solid #ccc',
-                        borderRadius:'6px', cursor:'pointer', fontWeight:'bold',
-                        display:'flex', alignItems:'center', gap:'8px'
-                      }}
-                    >
-                      {hasValidAttendance(selectedPatient) ? (
-                        <>+ Asignar Tarea</>
-                      ) : (
-                        <>🔒 Registrar Asistencia (-1 Nexus)</>
-                      )}
-                    </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={() => setIsHistoryOpen(true)} style={{ padding: '10px 15px', background: '#607D8B', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
+                    📜 Historial
+                  </button>
+                  {/* Botón Asignar con Lógica de Candado */}
+                  <button
+                    onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance}
+                    style={{
+                      padding: '10px 20px',
+                      background: hasValidAttendance(selectedPatient) ? '#2196F3' : '#E0E0E0',
+                      color: hasValidAttendance(selectedPatient) ? 'white' : '#757575',
+                      border: hasValidAttendance(selectedPatient) ? 'none' : '1px solid #ccc',
+                      borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold',
+                      display: 'flex', alignItems: 'center', gap: '8px'
+                    }}
+                  >
+                    {hasValidAttendance(selectedPatient) ? (
+                      <>+ Asignar Tarea</>
+                    ) : (
+                      <>🔒 Registrar Asistencia (-1 Nexus)</>
+                    )}
+                  </button>
                 </div>
                 {!hasValidAttendance(selectedPatient) && (
-                   <small style={{color:'#D32F2F', fontSize:'11px'}}>
-                       * Requiere asistencia reciente (72h) para asignar.
-                   </small>
+                  <small style={{ color: '#D32F2F', fontSize: '11px' }}>
+                    * Requiere asistencia reciente (72h) para asignar.
+                  </small>
                 )}
               </div>
             </div>
 
             {/* NOTAS CLÍNICAS */}
-            <div style={{background:'#FFFDE7', padding:'20px', borderRadius:'8px', border:'1px solid #FFF59D', marginBottom:'25px'}}>
-                <h3 style={{marginTop:0, color:'#F57F17', fontSize:'16px'}}>🔓 Notas Clínicas (Privadas)</h3>
-                <div style={{display:'flex', gap:'10px', marginBottom:'15px'}}>
-                    <input 
-                      value={newIndicator} 
-                      onChange={(e) => setNewIndicator(e.target.value)} 
-                      onKeyDown={(e) => e.key === 'Enter' && handleAddIndicator()}
-                      placeholder="Nota rápida..."
-                      style={{flex:1, padding:'10px', borderRadius:'4px', border:'1px solid #FBC02D'}}
-                    />
-                    <button onClick={handleAddIndicator} style={{background:'#FBC02D', color:'#333', border:'none', padding:'0 20px', borderRadius:'4px', cursor:'pointer'}}>Agregar</button>
-                </div>
-                <div style={{display:'flex', flexWrap:'wrap', gap:'8px'}}>
-                    {(selectedPatient.clinicalIndicators?.[user.uid] || []).map((item: string, idx: number) => (
-                        <div key={idx} style={{background:'white', border:'1px solid #FFF176', padding:'5px 12px', borderRadius:'20px', fontSize:'14px', color:'#555', display:'flex', alignItems:'center', gap:'8px'}}>
-                            • {item} <button onClick={() => handleDeleteIndicator(item)} style={{border:'none', background:'none', cursor:'pointer', color:'#D32F2F', fontWeight:'bold'}}> ✕ </button>
-                        </div>
-                    ))}
-                </div>
+            <div style={{ background: '#FFFDE7', padding: '20px', borderRadius: '8px', border: '1px solid #FFF59D', marginBottom: '25px' }}>
+              <h3 style={{ marginTop: 0, color: '#F57F17', fontSize: '16px' }}>🔓 Notas Clínicas (Privadas)</h3>
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                <input
+                  value={newIndicator}
+                  onChange={(e) => setNewIndicator(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddIndicator()}
+                  placeholder="Nota rápida..."
+                  style={{ flex: 1, padding: '10px', borderRadius: '4px', border: '1px solid #FBC02D' }}
+                />
+                <button onClick={handleAddIndicator} style={{ background: '#FBC02D', color: '#333', border: 'none', padding: '0 20px', borderRadius: '4px', cursor: 'pointer' }}>Agregar</button>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {(selectedPatient.clinicalIndicators?.[user.uid] || []).map((item: string, idx: number) => (
+                  <div key={idx} style={{ background: 'white', border: '1px solid #FFF176', padding: '5px 12px', borderRadius: '20px', fontSize: '14px', color: '#555', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    • {item} <button onClick={() => handleDeleteIndicator(item)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#D32F2F', fontWeight: 'bold' }}> ✕ </button>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* LISTA TAREAS */}
-            <h3 style={{color:'#455A64'}}>Misiones y Rutinas Activas</h3>
+            <h3 style={{ color: '#455A64' }}>Misiones y Rutinas Activas</h3>
             {patientTasks.filter(t => t.status !== 'completed').length === 0 ? (
-                <p style={{color:'#999', fontStyle:'italic'}}>No hay tareas activas.</p>
+              <p style={{ color: '#999', fontStyle: 'italic' }}>No hay tareas activas.</p>
             ) : (
-                <div style={{display:'grid', gap:'10px'}}>
-                    {patientTasks.filter(t => t.status !== 'completed').map(t => {
-                        const isRoutine = t.type === 'routine';
-                        return (
-                            <div key={t.id} style={{background:'white', padding:'15px', borderRadius:'8px', borderLeft:`5px solid ${t.themeColor || '#ccc'}`, display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 2px 5px rgba(0,0,0,0.05)'}}>
-                                <div>
-                                    <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-                                        <span style={{fontSize:'10px', padding:'2px 6px', borderRadius:'4px', color:'white', background: isRoutine ? '#9C27B0' : '#E65100'}}>
-                                            {isRoutine ? 'RUTINA' : 'MISIÓN'}
-                                        </span>
-                                        <strong style={{color:'#333'}}>{t.title}</strong>
-                                    </div>
-                                    <div style={{fontSize:'13px', color:'#666', marginTop:'2px'}}>{t.description}</div>
-                                </div>
-                                <div style={{display:'flex', gap:'10px'}}>
-                                    <button onClick={() => handleOpenEditTask(t)} style={{border:'none', background:'none', cursor:'pointer', fontSize:'18px'}}>✏️</button>
-                                    <button onClick={() => handleDeleteTask(t.id, isRoutine)} style={{color:'#D32F2F', background:'none', border:'none', cursor:'pointer', fontSize:'18px'}}>🗑️</button>
-                                </div>
+              <div style={{ display: 'grid', gap: '10px' }}>
+                {patientTasks.filter(t => t.status !== 'completed').map(t => {
+                  const isRoutine = t.type === 'routine';
+
+                  // --- 1. LÓGICA DE CÁLCULO DE AVANCE VISUAL (Últimos 7 días) ---
+                  let statusBadge = null;
+                  let lastActivityText = null;
+
+                  if (isRoutine) {
+                    // Generar los últimos 7 días (Hoy hacia atrás)
+                    const daysToCheck = [];
+                    for (let i = 6; i >= 0; i--) {
+                      const d = new Date();
+                      d.setDate(d.getDate() - i);
+                      daysToCheck.push(d);
+                    }
+
+                    statusBadge = (
+                      <div style={{ display: 'flex', gap: '5px', marginTop: '8px' }}>
+                        {daysToCheck.map((dateObj, idx) => {
+                          const year = dateObj.getFullYear();
+                          const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                          const day = String(dateObj.getDate()).padStart(2, '0');
+                          const dateKey = `${year}-${month}-${day}`;
+                          
+                          // Verificar si existe la fecha en el historial
+                          const isDone = t.completionHistory && t.completionHistory[dateKey];
+                          
+                          // Letra del día (L, M, M, J, V, S, D)
+                          const dayLetter = dateObj.toLocaleDateString('es-ES', { weekday: 'narrow' }).toUpperCase();
+
+                          return (
+                            <div key={idx} style={{ textAlign: 'center' }}>
+                              <div style={{
+                                width: '22px', height: '22px',
+                                borderRadius: '50%',
+                                background: isDone ? '#4CAF50' : '#ECEFF1',
+                                color: isDone ? 'white' : '#B0BEC5',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '12px', fontWeight: 'bold',
+                                border: isDone ? '1px solid #388E3C' : '1px solid #CFD8DC',
+                                cursor: 'help'
+                              }} title={dateKey}>
+                                {isDone ? '✓' : ''}
+                              </div>
+                              <div style={{ fontSize: '9px', color: '#90A4AE', marginTop: '2px', fontWeight: 'bold' }}>
+                                {dayLetter}
+                              </div>
                             </div>
-                        );
-                    })}
-                </div>
+                          );
+                        })}
+                      </div>
+                    );
+
+                  } else {
+                    // Badge para Misiones (Sin cambios)
+                    const isCompleted = t.status === 'completed';
+                    statusBadge = (
+                      <div style={{
+                        display: 'inline-block',
+                        background: isCompleted ? '#E8F5E9' : '#FFF3E0',
+                        color: isCompleted ? '#2E7D32' : '#EF6C00',
+                        padding: '4px 8px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        marginTop: '8px',
+                        border: isCompleted ? '1px solid #A5D6A7' : '1px solid #FFE0B2'
+                      }}>
+                        {isCompleted ? '🏆 COMPLETADA' : '⏳ PENDIENTE'}
+                      </div>
+                    );
+                  }
+
+                  // Opcional: Última actualización si existe el campo
+                  if (t.lastUpdated) {
+                    const dateObj = t.lastUpdated.toDate ? t.lastUpdated.toDate() : new Date(t.lastUpdated);
+                    lastActivityText = <span style={{ fontSize: '10px', color: '#90A4AE', marginLeft: '8px' }}>Actualizado: {dateObj.toLocaleDateString()}</span>;
+                  }
+
+                  return (
+                    <div key={t.id} style={{
+                      background: 'white',
+                      padding: '15px',
+                      borderRadius: '8px',
+                      borderLeft: `5px solid ${t.themeColor || '#ccc'}`,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
+                      marginBottom: '10px'
+                    }}>
+                      <div>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', color: 'white', background: isRoutine ? '#9C27B0' : '#E65100' }}>
+                            {isRoutine ? 'RUTINA' : 'MISIÓN'}
+                          </span>
+                          <strong style={{ color: '#333' }}>{t.title}</strong>
+                        </div>
+
+                        <div style={{ fontSize: '13px', color: '#666', marginTop: '4px' }}>{t.description}</div>
+
+                        {/* --- 2. RENDERIZADO UI DEL AVANCE --- */}
+                        <div style={{ marginTop: '5px', display: 'flex', alignItems: 'center' }}>
+                          {statusBadge}
+                          {lastActivityText}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button onClick={() => handleOpenEditTask(t)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px' }} title="Editar">✏️</button>
+                        <button onClick={() => handleDeleteTask(t.id, isRoutine)} style={{ color: '#D32F2F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }} title="Eliminar">🗑️</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
 
             {/* MODALES DEL DETALLE */}
-            <AssignmentModal 
-              isOpen={isAssignmentModalOpen} 
-              onClose={() => { setIsAssignmentModalOpen(false); setTaskToEdit(null); loadPatientTasks(selectedPatient.id); }} 
-              patientId={selectedPatient.id} 
-              professionalId={user.uid} 
+            <AssignmentModal
+              isOpen={isAssignmentModalOpen}
+              onClose={() => { setIsAssignmentModalOpen(false); setTaskToEdit(null); loadPatientTasks(selectedPatient.id); }}
+              patientId={selectedPatient.id}
+              professionalId={user.uid}
               patientName={selectedPatient.fullName}
               userProfessionId={profData?.professionType || 'psychologist'}
               taskToEdit={taskToEdit}

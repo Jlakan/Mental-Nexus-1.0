@@ -687,12 +687,13 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
         [`slots.${slotKey}.updatedAt`]: slotPayload.updatedAt
       });
 
-      // 2. Incrementar contador en el paciente
+      // 2. Incrementar contador en el paciente Y LIMPIAR CITA FUTURA
       if (patientId) {
         const patRef = doc(db, "patients", patientId);
         batch.update(patRef, {
           [`careTeam.${selectedProfId}.noShowCount`]: increment(1),
-          [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString()
+          [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString(),
+          [`careTeam.${selectedProfId}.nextAppointment`]: null // <--- CORRECCIÓN AGREGADA
         });
       }
 
@@ -766,29 +767,65 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
 
   const handleSoftCancel = async (slotKey: string) => {
     const reason = window.prompt("¿Motivo de la cancelación?", "Cancelación del paciente"); if (reason === null) return;
-    setLoading(true); try { const year = selectedDate.getFullYear(); const month = selectedDate.getMonth(); const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; const batch = writeBatch(db);
-    const slotPayload = { status: 'cancelled', adminNotes: `[CANCELADO] ${reason}`, updatedAt: new Date().toISOString() };
-    const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId); batch.update(agendaRef, { [`slots.${slotKey}.status`]: 'cancelled', [`slots.${slotKey}.adminNotes`]: slotPayload.adminNotes, [`slots.${slotKey}.updatedAt`]: slotPayload.updatedAt }); await batch.commit();
-    setCurrentMonthData({ ...currentMonthData!, [slotKey]: { ...currentMonthData![slotKey], ...slotPayload } as any }); } catch (e) { console.error(e); alert("Error al cancelar.");
-    } finally { setLoading(false); }
+    setLoading(true);
+    try {
+      const year = selectedDate.getFullYear();
+      const month = selectedDate.getMonth();
+      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
+      const batch = writeBatch(db);
+
+      // 1. Actualizar Slot
+      const slotPayload = {
+        status: 'cancelled',
+        adminNotes: `[CANCELADO] ${reason}`,
+        updatedAt: new Date().toISOString()
+      };
+      const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
+      batch.update(agendaRef, {
+        [`slots.${slotKey}.status`]: 'cancelled',
+        [`slots.${slotKey}.adminNotes`]: slotPayload.adminNotes,
+        [`slots.${slotKey}.updatedAt`]: slotPayload.updatedAt
+      });
+
+      // 2. Actualizar Paciente (Limpiar próxima cita)
+      const patientId = currentMonthData?.[slotKey]?.patientId;
+      if (patientId) {
+        const patientRef = doc(db, "patients", patientId);
+        batch.update(patientRef, {
+          [`careTeam.${selectedProfId}.nextAppointment`]: null, // <--- CORRECCIÓN AGREGADA
+          [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString()
+        });
+      }
+
+      await batch.commit();
+      setCurrentMonthData({ ...currentMonthData!, [slotKey]: { ...currentMonthData![slotKey], ...slotPayload } as any });
+      loadPatients(); // Recargar para actualizar panel lateral
+
+    } catch (e) {
+      console.error(e);
+      alert("Error al cancelar.");
+    } finally {
+      setLoading(false);
+    }
   };
+
   const handleReopenSlot = async (slotKey: string) => {
     if (!window.confirm("¿Reabrir este horario?")) return; setLoading(true); try { const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
-    const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; const originalTime = currentMonthData![slotKey].time; const cleanSlotLocal: AgendaSlot = { status: 'available', time: originalTime, duration: workConfig.durationMinutes, price: workConfig.defaultPrice };
-    const batch = writeBatch(db); const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
-    batch.update(agendaRef, { [`slots.${slotKey}.status`]: 'available', [`slots.${slotKey}.price`]: workConfig.defaultPrice, [`slots.${slotKey}.duration`]: workConfig.durationMinutes, [`slots.${slotKey}.patientId`]: deleteField(), [`slots.${slotKey}.patientName`]: deleteField(), [`slots.${slotKey}.patientExternalPhone`]: deleteField(), [`slots.${slotKey}.patientExternalEmail`]: deleteField(), [`slots.${slotKey}.adminNotes`]: deleteField(), [`slots.${slotKey}.paymentStatus`]: deleteField() });
-    const oldPatientId = currentMonthData![slotKey].patientId; if (oldPatientId) { batch.update(doc(db, "patients", oldPatientId), { [`careTeam.${selectedProfId}.nextAppointment`]: null }); } await batch.commit();
-    setCurrentMonthData({ ...currentMonthData!, [slotKey]: cleanSlotLocal }); } catch (e) { console.error(e); alert("Error al reabrir."); } finally { setLoading(false); }
+      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; const originalTime = currentMonthData![slotKey].time; const cleanSlotLocal: AgendaSlot = { status: 'available', time: originalTime, duration: workConfig.durationMinutes, price: workConfig.defaultPrice };
+      const batch = writeBatch(db); const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
+      batch.update(agendaRef, { [`slots.${slotKey}.status`]: 'available', [`slots.${slotKey}.price`]: workConfig.defaultPrice, [`slots.${slotKey}.duration`]: workConfig.durationMinutes, [`slots.${slotKey}.patientId`]: deleteField(), [`slots.${slotKey}.patientName`]: deleteField(), [`slots.${slotKey}.patientExternalPhone`]: deleteField(), [`slots.${slotKey}.patientExternalEmail`]: deleteField(), [`slots.${slotKey}.adminNotes`]: deleteField(), [`slots.${slotKey}.paymentStatus`]: deleteField() });
+      const oldPatientId = currentMonthData![slotKey].patientId; if (oldPatientId) { batch.update(doc(db, "patients", oldPatientId), { [`careTeam.${selectedProfId}.nextAppointment`]: null }); } await batch.commit();
+      setCurrentMonthData({ ...currentMonthData!, [slotKey]: cleanSlotLocal }); } catch (e) { console.error(e); alert("Error al reabrir."); } finally { setLoading(false); }
   };
   const handleSmartReleaseCheck = async (slotKey: string) => {
     if (waitlist.length > 0) { if (window.confirm(`⚠️ Hay ${waitlist.length} personas en espera. ¿ASIGNAR espacio a la lista?`)) { setSlotToReassign(slotKey); setIsWaitlistSelectorOpen(true);
-    return; } }
+      return; } }
     if(window.confirm("¿CANCELAR la cita actual?")) { handleSoftCancel(slotKey); }
   };
   const handleAssignFromWaitlist = async (waitlistItem: any) => { if (!slotToReassign || !currentMonthData) return; setLoading(true); try { const year = selectedDate.getFullYear();
     const month = selectedDate.getMonth(); const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; const batch = writeBatch(db);
     const slotPayload: Partial<AgendaSlot> = { status: 'booked', patientId: waitlistItem.patientId || undefined, patientName: waitlistItem.patientName, patientExternalPhone: waitlistItem.patientExternalPhone, adminNotes: `[Desde Espera] ${waitlistItem.notes ||
-    ''}`, paymentStatus: 'pending', updatedAt: new Date().toISOString() }; batch.update(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotToReassign}`]: { ...currentMonthData[slotToReassign], ...slotPayload } });
+      ''}`, paymentStatus: 'pending', updatedAt: new Date().toISOString() }; batch.update(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotToReassign}`]: { ...currentMonthData[slotToReassign], ...slotPayload } });
     if (waitlistItem.patientId) { const apptDate = getDateFromSlotKey(slotToReassign, year, month); batch.update(doc(db, "patients", waitlistItem.patientId), { [`careTeam.${selectedProfId}.nextAppointment`]: apptDate.toISOString() }); } batch.delete(doc(db, "waitlist", waitlistItem.id));
     await batch.commit(); setCurrentMonthData({ ...currentMonthData, [slotToReassign]: { ...currentMonthData[slotToReassign], ...slotPayload as AgendaSlot } }); loadWaitlist(); loadPatients(); setIsWaitlistSelectorOpen(false); setSlotToReassign(null);
     alert( `✅ Reasignado a ${waitlistItem.patientName}`); } catch (e) { console.error(e); alert("Error al reasignar."); } finally { setLoading(false); } };
@@ -847,10 +884,10 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
           const [dStr, tStr] = key.split('_');
           const sH = parseInt(tStr.substring(0, 2));
           const sM = parseInt(tStr.substring(2));
-          
+
           // Construimos fecha exacta del slot
           const slotDateObj = dayjs(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), parseInt(dStr), sH, sM));
-          
+
           // Evaluamos si es pasado
           const isPast = slotDateObj.isBefore(dayjs());
 
@@ -859,32 +896,32 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
               <div style={{fontWeight:'bold', color:'#555', minWidth:'50px'}}>{slot.time}</div>
               <div style={{flex:1}}>
                 {slot.status === 'available' ? (
-                  <div 
+                  <div
                     onClick={() => {
-                        // --- BLOQUEO FUNCIONAL ---
-                        if (isPast) {
-                            alert("No puedes agendar citas en una fecha u hora que ya pasó.");
-                            return;
-                        }
-                        
-                        if (formData.patientId && formData.patientName) { 
-                            setTargetSlotKey(key); 
-                            setIsFormOpen(true); 
-                        } else { 
-                            openForm(key, slot);
-                        } 
-                    }} 
-                    style={{
-                        // --- CAMBIO VISUAL ---
-                        background: isPast ? '#f5f5f5' : '#F1F8E9', 
-                        color: isPast ? '#aaa' : '#4CAF50', 
-                        border: isPast ? '1px solid #ddd' : '1px dashed #4CAF50', 
-                        padding:'8px', 
-                        borderRadius:'6px', 
-                        textAlign:'center', 
-                        cursor: isPast ? 'not-allowed' : 'pointer'
+                      // --- BLOQUEO FUNCIONAL ---
+                      if (isPast) {
+                        alert("No puedes agendar citas en una fecha u hora que ya pasó.");
+                        return;
+                      }
+
+                      if (formData.patientId && formData.patientName) {
+                        setTargetSlotKey(key);
+                        setIsFormOpen(true);
+                      } else {
+                        openForm(key, slot);
+                      }
                     }}
-                  > 
+                    style={{
+                      // --- CAMBIO VISUAL ---
+                      background: isPast ? '#f5f5f5' : '#F1F8E9',
+                      color: isPast ? '#aaa' : '#4CAF50',
+                      border: isPast ? '1px solid #ddd' : '1px dashed #4CAF50',
+                      padding:'8px',
+                      borderRadius:'6px',
+                      textAlign:'center',
+                      cursor: isPast ? 'not-allowed' : 'pointer'
+                    }}
+                  >
                     {isPast ? 'Tiempo transcurrido' : `+ Disponible ${formData.patientId && formData.patientName ? `(Agendar a ${formData.patientName})` : ''}`}
                   </div>
                 ) : slot.status === 'blocked' ? (
@@ -955,7 +992,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
 
       {/* SIDEBAR (Barra Lateral Izquierda) */}
       <div style={{ width: '280px', background: 'white', borderRight: '1px solid #ddd', display:'flex', flexDirection:'column', zIndex: 20, position: 'relative', boxShadow: '2px 0 5px rgba(0,0,0,0.05)' }}>
-        
+
         {/* --- CONTENEDOR INTERNO CON SCROLL (para botones y menú) --- */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
           <h3 style={{marginTop:0, color:'#333'}}>Opciones</h3>
@@ -974,9 +1011,9 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
           <div style={{borderTop:'1px solid #eee', margin:'10px 0'}}></div>
 
           {/* --- NUEVOS BOTONES LATERALES --- */}
-          
+
           {/* BOTÓN 1: PACIENTES SIN CITA */}
-          <button 
+          <button
             onClick={() => setActiveSidePanel(activeSidePanel === 'needing' ? 'none' : 'needing')}
             style={{
               width:'100%', padding:'12px', marginBottom:'10px', borderRadius:'8px', cursor:'pointer',
@@ -994,7 +1031,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
           </button>
 
           {/* BOTÓN 2: LISTA DE ESPERA */}
-          <button 
+          <button
             onClick={() => setActiveSidePanel(activeSidePanel === 'waitlist' ? 'none' : 'waitlist')}
             style={{
               width:'100%', padding:'12px', borderRadius:'8px', cursor:'pointer',
@@ -1025,7 +1062,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
             borderRight: '1px solid #ddd',
             display: 'flex', flexDirection: 'column'
           }}>
-            
+
             {/* HEADER DEL PANEL */}
             <div style={{padding:'20px', borderBottom:'1px solid #eee', background:'#fafafa', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
               <h3 style={{margin:0, color:'#333'}}>
@@ -1037,14 +1074,14 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
             {/* CONTENIDO DEL PANEL: SIN CITA */}
             {activeSidePanel === 'needing' && (
               <div style={{flex:1, overflowY:'auto', padding:'10px'}}>
-                 {patientsNeedingAppt.length === 0 ? (
-                   <div style={{padding:'20px', textAlign:'center', color:'#999', fontStyle:'italic'}}>
-                     ¡Excelente! Todos tus pacientes activos tienen cita futura.
-                   </div>
-                 ) : (
-                   patientsNeedingAppt.map(p => (
-                    <div 
-                      key={p.id} 
+                {patientsNeedingAppt.length === 0 ? (
+                  <div style={{padding:'20px', textAlign:'center', color:'#999', fontStyle:'italic'}}>
+                    ¡Excelente! Todos tus pacientes activos tienen cita futura.
+                  </div>
+                ) : (
+                  patientsNeedingAppt.map(p => (
+                    <div
+                      key={p.id}
                       onClick={() => handleScheduleNeedingPatient(p)}
                       title="Click para seleccionar y agendar"
                       style={{background:'white', border:'1px solid #eee', marginBottom:'8px', padding:'12px', borderRadius:'8px', boxShadow:'0 2px 5px rgba(0,0,0,0.05)', cursor:'pointer', transition:'background 0.2s'}}
@@ -1067,34 +1104,34 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
                       </div>
                     </div>
                   ))
-                 )}
+                )}
               </div>
             )}
 
             {/* CONTENIDO DEL PANEL: LISTA DE ESPERA */}
             {activeSidePanel === 'waitlist' && (
               <div style={{flex:1, overflowY:'auto', padding:'10px'}}>
-                 <div style={{marginBottom:'15px', padding:'10px', background:'#E3F2FD', borderRadius:'8px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                   <span style={{fontSize:'12px', color:'#1565C0'}}>¿Nuevo paciente en espera?</span>
-                   <button 
-                     onClick={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true); }} 
-                     style={{background:'#1976D2', color:'white', border:'none', borderRadius:'4px', padding:'5px 10px', cursor:'pointer', fontSize:'12px', fontWeight:'bold'}}
-                   >
-                     + Agregar
-                   </button>
-                 </div>
+                <div style={{marginBottom:'15px', padding:'10px', background:'#E3F2FD', borderRadius:'8px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                  <span style={{fontSize:'12px', color:'#1565C0'}}>¿Nuevo paciente en espera?</span>
+                  <button
+                    onClick={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true); }}
+                    style={{background:'#1976D2', color:'white', border:'none', borderRadius:'4px', padding:'5px 10px', cursor:'pointer', fontSize:'12px', fontWeight:'bold'}}
+                  >
+                    + Agregar
+                  </button>
+                </div>
 
-                 {waitlist.length === 0 ? (
-                   <div style={{textAlign:'center', color:'#999', marginTop:'20px'}}>La lista está vacía.</div>
-                 ) : (
-                   waitlist.map(w => (
+                {waitlist.length === 0 ? (
+                  <div style={{textAlign:'center', color:'#999', marginTop:'20px'}}>La lista está vacía.</div>
+                ) : (
+                  waitlist.map(w => (
                     <div key={w.id} style={{background:'white', borderLeft:'4px solid #FFA000', border:'1px solid #eee', borderLeftWidth:'4px', marginBottom:'8px', padding:'12px', borderRadius:'4px'}}>
                       <div style={{fontWeight:'bold', color:'#333'}}>{w.patientName}</div>
                       <div style={{fontSize:'12px', color:'#666', margin:'5px 0', fontStyle:'italic'}}>"{w.notes || 'Sin preferencias'}"</div>
                       <div style={{fontSize:'10px', color:'#999', display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'8px'}}>
                         <span>📅 {w.createdAt?.seconds ? new Date(w.createdAt.seconds * 1000).toLocaleDateString() : 'Pendiente...'}</span>
-                        <button 
-                          onClick={async () => { if(window.confirm("¿Borrar de la lista?")) { await deleteDoc(doc(db, "waitlist", w.id)); loadWaitlist(); }}} 
+                        <button
+                          onClick={async () => { if(window.confirm("¿Borrar de la lista?")) { await deleteDoc(doc(db, "waitlist", w.id)); loadWaitlist(); }}}
                           style={{border:'none', background:'none', color:'#D32F2F', cursor:'pointer', fontSize:'11px', textDecoration:'underline'}}
                         >
                           Eliminar
@@ -1102,7 +1139,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
                       </div>
                     </div>
                   ))
-                 )}
+                )}
               </div>
             )}
           </div>
@@ -1172,7 +1209,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
           <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gridAutoRows:'minmax(100px, 1fr)', gap:'10px'}}>
             {calendarDays.map((dateObj, i) => {
               if (!dateObj) return <div key={i} />;
-              
+
               const isToday = dateObj.toDateString() === new Date().toDateString();
               const isPastDay = dayjs(dateObj).isBefore(dayjs(), 'day');
 
@@ -1180,8 +1217,8 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
               let available = 0; let hasSlots = false;
               if (currentMonthData) {
                 const slots = Object.entries(currentMonthData).filter(([k]) => k.startsWith(`${dayStr}_`));
-                if (slots.length > 0) { 
-                  hasSlots = true; 
+                if (slots.length > 0) {
+                  hasSlots = true;
                   available = slots.filter(([,v]) => {
                     if(v.status !== 'available') return false;
                     if(isPastDay) return false;
@@ -1196,7 +1233,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
               }
 
               let bg = 'white'; let status = ''; let statusCol = '#999';
-              
+
               if (isPastDay) {
                 bg = '#f9f9f9';
               } else if (hasSlots) {
