@@ -106,11 +106,11 @@ export default function PatientRegister() {
         isManual: false 
       });
 
-      // 3. REDIRECCIÓN FINAL (CORREGIDO)
-      // Usamos href = '/' para forzar una recarga completa en la raíz.
-      // Esto hará que App.tsx verifique de nuevo el usuario en Firebase,
-      // encuentre el perfil recién creado y redirija al Dashboard correcto.
-      window.location.href = '/';
+      // 3. REDIRECCIÓN FINAL (MODIFICADO)
+      // Forzamos una recarga completa del navegador.
+      // Esto hará que App.tsx se ejecute de cero, detecte que el usuario
+      // ya tiene documento en "patients" y muestre el Dashboard.
+      window.location.reload();
 
     } catch (error: any) {
       console.error("Error al registrar:", error);
