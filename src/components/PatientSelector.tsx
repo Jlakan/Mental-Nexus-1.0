@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface Props {
   patients: any[];
@@ -67,7 +67,7 @@ export default function PatientSelector({ patients, selectedPatientId, manualNam
           borderRadius: '0 0 6px 6px', zIndex: 1000, maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 10px rgba(0,0,0,0.1)'
         }}>
           {filteredPatients.length === 0 && !showManualOption && (
-             <div style={{padding:'10px', color:'#999', fontStyle:'italic'}}>No se encontraron resultados.</div>
+            <div style={{padding:'10px', color:'#999', fontStyle:'italic'}}>No se encontraron resultados.</div>
           )}
 
           {filteredPatients.map(p => (
@@ -80,13 +80,13 @@ export default function PatientSelector({ patients, selectedPatientId, manualNam
             >
               {/* --- DISTINCIÓN VISUAL --- */}
               <div style={{fontSize:'18px'}}>
-                  {p.isManual ? '📝' : '📱'}
+                {p.isManual ? '📝' : '📱'}
               </div>
               <div>
-                  <div style={{fontWeight:'bold'}}>{p.fullName}</div>
-                  <div style={{fontSize:'11px', color: p.isManual ? '#795548' : '#1976D2'}}>
-                      {p.isManual ? 'Paciente Local (Sin App)' : 'Usuario App Verificado'}
-                  </div>
+                <div style={{fontWeight:'bold'}}>{p.fullName}</div>
+                <div style={{fontSize:'11px', color: p.isManual ? '#795548' : '#1976D2'}}>
+                  {p.isManual ? 'Paciente Local (Sin App)' : 'Usuario App Verificado'}
+                </div>
               </div>
             </div>
           ))}

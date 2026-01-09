@@ -9,9 +9,7 @@ import AgendaConfigModal from './AgendaConfigModal';
 import { generateMonthSkeleton } from '../utils/agendaGenerator';
 import type { MonthlySlotMap, WorkConfig, AgendaSlot } from '../utils/agendaTypes';
 
-// --- IMPORTACIONES MUI & DAYJS ---
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+// --- IMPORTACIONES DAYJS (Sin MUI Adapters) ---
 import dayjs from 'dayjs';
 import 'dayjs/locale/es';
 import updateLocale from 'dayjs/plugin/updateLocale';
@@ -111,6 +109,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [eventsTab, setEventsTab] = useState<'upcoming' | 'past'>('upcoming');
+  const [activeSidePanel, setActiveSidePanel] = useState<'none' | 'needing' | 'waitlist'>('none');
 
   // --- MODALES ---
   const [isConfigOpen, setIsConfigOpen] = useState(false);
@@ -154,7 +153,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
 
   const [savePricePreference, setSavePricePreference] = useState(false);
 
-  // NUEVO: Estado para guardar las faltas del paciente seleccionado en el formulario
+  // Estado para guardar las faltas del paciente seleccionado en el formulario
   const [selectedPatientNoShows, setSelectedPatientNoShows] = useState<number>(0);
 
   // Inicializar modal nuevo evento
@@ -176,7 +175,8 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
         if (userRole === 'professional') {
           const docSnap = await getDoc(doc(db, "professionals", currentUserId));
           const selfData = { id: currentUserId, ...docSnap.data() };
-          if (selfData.agendaSettings) setWorkConfig(selfData.agendaSettings);
+          // Type casting para agendaSettings
+          if ((selfData as any).agendaSettings) setWorkConfig((selfData as any).agendaSettings);
           setMyProfessionals([selfData]);
           setSelectedProfId(currentUserId);
         } else {
@@ -186,7 +186,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
           setMyProfessionals(pros);
           if (pros.length > 0) {
             setSelectedProfId(pros[0].id);
-            if (pros[0].agendaSettings) setWorkConfig(pros[0].agendaSettings);
+            if ((pros[0] as any).agendaSettings) setWorkConfig((pros[0] as any).agendaSettings);
           }
         }
       } catch (e) { console.error(e); }
@@ -262,6 +262,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
 
   const loadWaitlist = async () => {
     try {
+      // Nota: Requiere índice compuesto en Firebase
       const q = query(collection(db, "waitlist"), where("professionalId", "==", selectedProfId), orderBy("createdAt", "asc"));
       const snap = await getDocs(q);
       setWaitlist(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -950,65 +951,167 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
   if (loading && !currentMonthData && !isMonthInitialized) return <div style={{padding:'50px', textAlign:'center'}}>Cargando...</div>;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', fontFamily: 'sans-serif', background:'#f5f5f5' }}>
+    <div style={{ display: 'flex', height: '100vh', fontFamily: 'sans-serif', background:'#f5f5f5', overflow:'hidden' }}>
 
-      {/* SIDEBAR */}
-      <div style={{ width: '280px', background: 'white', borderRight: '1px solid #ddd', padding:'20px', display:'flex', flexDirection:'column', overflowY:'auto' }}>
-        <h3 style={{marginTop:0}}>Opciones</h3>
-        {onBack && <button onClick={onBack} style={{marginBottom:'20px', width:'100%', padding:'10px'}}> ⬅ Volver </button>}
+      {/* SIDEBAR (Barra Lateral Izquierda) */}
+      <div style={{ width: '280px', background: 'white', borderRight: '1px solid #ddd', display:'flex', flexDirection:'column', zIndex: 20, position: 'relative', boxShadow: '2px 0 5px rgba(0,0,0,0.05)' }}>
+        
+        {/* --- CONTENEDOR INTERNO CON SCROLL (para botones y menú) --- */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+          <h3 style={{marginTop:0, color:'#333'}}>Opciones</h3>
+          {onBack && <button onClick={onBack} style={{marginBottom:'20px', width:'100%', padding:'10px', cursor:'pointer', border:'1px solid #ccc', background:'white', borderRadius:'6px'}}> ⬅ Volver </button>}
 
-        <button onClick={() => setIsConfigOpen(true)} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'white', border:'1px solid #ccc', borderRadius:'4px', cursor:'pointer'}}>⚙️ Configurar</button>
+          <button onClick={() => setIsConfigOpen(true)} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'white', border:'1px solid #ccc', borderRadius:'6px', cursor:'pointer', textAlign:'left'}}>⚙️ Configurar</button>
 
-        {/* BOTÓN UNIFICADO DE EVENTOS */}
-        <button onClick={() => setIsEventsManagerOpen(true)} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'#E1BEE7', border:'1px solid #BA68C8', color:'#7B1FA2', borderRadius:'4px', cursor:'pointer', fontWeight:'bold'}}>📅 Mis Eventos</button>
+          <button onClick={() => setIsEventsManagerOpen(true)} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'#F3E5F5', border:'1px solid #E1BEE7', color:'#7B1FA2', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', textAlign:'left'}}>📅 Mis Eventos</button>
 
-        {isMonthInitialized ? (
-          <button onClick={handleRegenerateMonth} style={{width:'100%', marginBottom:'15px', padding:'10px', background:'#FFF3E0', border:'1px solid #FFB74D', color:'#E65100', borderRadius:'4px', cursor:'pointer'}}>🔄 Actualizar Espacios Disponibles</button>
-        ) : (
-          <button onClick={handleInitializeMonth} style={{width:'100%', marginBottom:'15px', padding:'10px', background:'#FF9800', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>⚡ Inicializar Mes</button>
+          {isMonthInitialized ? (
+            <button onClick={handleRegenerateMonth} style={{width:'100%', marginBottom:'20px', padding:'10px', background:'#FFF3E0', border:'1px solid #FFB74D', color:'#E65100', borderRadius:'6px', cursor:'pointer', textAlign:'left'}}>🔄 Actualizar Espacios</button>
+          ) : (
+            <button onClick={handleInitializeMonth} style={{width:'100%', marginBottom:'20px', padding:'10px', background:'#FF9800', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', textAlign:'left'}}>⚡ Inicializar Mes</button>
+          )}
+
+          <div style={{borderTop:'1px solid #eee', margin:'10px 0'}}></div>
+
+          {/* --- NUEVOS BOTONES LATERALES --- */}
+          
+          {/* BOTÓN 1: PACIENTES SIN CITA */}
+          <button 
+            onClick={() => setActiveSidePanel(activeSidePanel === 'needing' ? 'none' : 'needing')}
+            style={{
+              width:'100%', padding:'12px', marginBottom:'10px', borderRadius:'8px', cursor:'pointer',
+              display:'flex', justifyContent:'space-between', alignItems:'center',
+              background: activeSidePanel === 'needing' ? '#FFEBEE' : 'white',
+              border: activeSidePanel === 'needing' ? '2px solid #EF5350' : '1px solid #eee',
+              color: activeSidePanel === 'needing' ? '#D32F2F' : '#555',
+              transition: 'all 0.2s'
+            }}
+          >
+            <span style={{fontWeight:'bold'}}>⚠️ Sin Cita</span>
+            <span style={{background:'#D32F2F', color:'white', borderRadius:'12px', padding:'2px 8px', fontSize:'11px'}}>
+              {patientsNeedingAppt.length}
+            </span>
+          </button>
+
+          {/* BOTÓN 2: LISTA DE ESPERA */}
+          <button 
+            onClick={() => setActiveSidePanel(activeSidePanel === 'waitlist' ? 'none' : 'waitlist')}
+            style={{
+              width:'100%', padding:'12px', borderRadius:'8px', cursor:'pointer',
+              display:'flex', justifyContent:'space-between', alignItems:'center',
+              background: activeSidePanel === 'waitlist' ? '#E3F2FD' : 'white',
+              border: activeSidePanel === 'waitlist' ? '2px solid #2196F3' : '1px solid #eee',
+              color: activeSidePanel === 'waitlist' ? '#1976D2' : '#555',
+              transition: 'all 0.2s'
+            }}
+          >
+            <span style={{fontWeight:'bold'}}>⏳ Lista de Espera</span>
+            <span style={{background:'#1976D2', color:'white', borderRadius:'12px', padding:'2px 8px', fontSize:'11px'}}>
+              {waitlist.length}
+            </span>
+          </button>
+        </div>
+
+        {/* --- PANEL LATERAL DESPLEGABLE (FLOTANTE FUERA DEL SCROLL) --- */}
+        {activeSidePanel !== 'none' && (
+          <div style={{
+            position: 'absolute',
+            left: '100%', // Se mueve a la derecha del contenedor padre
+            top: 0, bottom: 0, // Altura completa
+            width: '320px',
+            background: 'white',
+            boxShadow: '5px 0 15px rgba(0,0,0,0.1)',
+            zIndex: 19,
+            borderRight: '1px solid #ddd',
+            display: 'flex', flexDirection: 'column'
+          }}>
+            
+            {/* HEADER DEL PANEL */}
+            <div style={{padding:'20px', borderBottom:'1px solid #eee', background:'#fafafa', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+              <h3 style={{margin:0, color:'#333'}}>
+                {activeSidePanel === 'needing' ? '⚠️ Requieren Atención' : '⏳ Lista de Espera'}
+              </h3>
+              <button onClick={() => setActiveSidePanel('none')} style={{border:'none', background:'none', fontSize:'18px', cursor:'pointer', color:'#999'}}>✕</button>
+            </div>
+
+            {/* CONTENIDO DEL PANEL: SIN CITA */}
+            {activeSidePanel === 'needing' && (
+              <div style={{flex:1, overflowY:'auto', padding:'10px'}}>
+                 {patientsNeedingAppt.length === 0 ? (
+                   <div style={{padding:'20px', textAlign:'center', color:'#999', fontStyle:'italic'}}>
+                     ¡Excelente! Todos tus pacientes activos tienen cita futura.
+                   </div>
+                 ) : (
+                   patientsNeedingAppt.map(p => (
+                    <div 
+                      key={p.id} 
+                      onClick={() => handleScheduleNeedingPatient(p)}
+                      title="Click para seleccionar y agendar"
+                      style={{background:'white', border:'1px solid #eee', marginBottom:'8px', padding:'12px', borderRadius:'8px', boxShadow:'0 2px 5px rgba(0,0,0,0.05)', cursor:'pointer', transition:'background 0.2s'}}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#F5F5F5'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
+                    >
+                      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
+                        <div>
+                          <strong style={{color:'#333', fontSize:'14px'}}>{p.fullName}</strong>
+                          <div style={{fontSize:'11px', color:'#666', marginTop:'4px'}}>
+                            Última: {p.careTeam?.[selectedProfId]?.nextAppointment
+                              ? new Date(p.careTeam[selectedProfId].nextAppointment).toLocaleDateString('es-ES', {day:'2-digit', month:'short'})
+                              : 'Nunca'}
+                          </div>
+                        </div>
+                      </div>
+                      {/* BOTÓN PAUSAR (El de agendar se quitó, ahora es click en la tarjeta) */}
+                      <div style={{marginTop:'10px', textAlign:'right'}}>
+                        <button onClick={(e) => { e.stopPropagation(); handleArchivePatient(p.id, p.fullName); }} style={{border:'1px solid #9E9E9E', background:'white', color:'#757575', borderRadius:'4px', cursor:'pointer', fontSize:'11px', padding:'4px 8px'}}>Pausar Seguimiento</button>
+                      </div>
+                    </div>
+                  ))
+                 )}
+              </div>
+            )}
+
+            {/* CONTENIDO DEL PANEL: LISTA DE ESPERA */}
+            {activeSidePanel === 'waitlist' && (
+              <div style={{flex:1, overflowY:'auto', padding:'10px'}}>
+                 <div style={{marginBottom:'15px', padding:'10px', background:'#E3F2FD', borderRadius:'8px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                   <span style={{fontSize:'12px', color:'#1565C0'}}>¿Nuevo paciente en espera?</span>
+                   <button 
+                     onClick={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true); }} 
+                     style={{background:'#1976D2', color:'white', border:'none', borderRadius:'4px', padding:'5px 10px', cursor:'pointer', fontSize:'12px', fontWeight:'bold'}}
+                   >
+                     + Agregar
+                   </button>
+                 </div>
+
+                 {waitlist.length === 0 ? (
+                   <div style={{textAlign:'center', color:'#999', marginTop:'20px'}}>La lista está vacía.</div>
+                 ) : (
+                   waitlist.map(w => (
+                    <div key={w.id} style={{background:'white', borderLeft:'4px solid #FFA000', border:'1px solid #eee', borderLeftWidth:'4px', marginBottom:'8px', padding:'12px', borderRadius:'4px'}}>
+                      <div style={{fontWeight:'bold', color:'#333'}}>{w.patientName}</div>
+                      <div style={{fontSize:'12px', color:'#666', margin:'5px 0', fontStyle:'italic'}}>"{w.notes || 'Sin preferencias'}"</div>
+                      <div style={{fontSize:'10px', color:'#999', display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'8px'}}>
+                        <span>📅 {w.createdAt?.seconds ? new Date(w.createdAt.seconds * 1000).toLocaleDateString() : 'Pendiente...'}</span>
+                        <button 
+                          onClick={async () => { if(window.confirm("¿Borrar de la lista?")) { await deleteDoc(doc(db, "waitlist", w.id)); loadWaitlist(); }}} 
+                          style={{border:'none', background:'none', color:'#D32F2F', cursor:'pointer', fontSize:'11px', textDecoration:'underline'}}
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                 )}
+              </div>
+            )}
+          </div>
         )}
 
-        <div style={{marginBottom:'20px', borderTop:'1px solid #eee', paddingTop:'15px'}}>
-          <h4 style={{margin:'0 0 10px 0', color:'#D32F2F'}}>⚠️ Requieren Cita ({patientsNeedingAppt.length})</h4>
-          <div style={{maxHeight:'200px', overflowY:'auto', background:'#FFEBEE', borderRadius:'8px', padding:'5px'}}>
-            {patientsNeedingAppt.length === 0 ? <div style={{fontSize:'12px', padding:'10px', color:'#D32F2F'}}>¡Agenda al día! 🎉</div> : patientsNeedingAppt.map(p => (
-              <div key={p.id} style={{background:'white', marginBottom:'5px', padding:'8px', borderRadius:'4px', fontSize:'12px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                <div>
-                  <strong>{p.fullName}</strong>
-                  <div style={{fontSize:'10px', color:'#666'}}>
-                    {p.careTeam?.[selectedProfId]?.nextAppointment
-                      ? `Última: ${new Date(p.careTeam[selectedProfId].nextAppointment).toLocaleDateString('es-ES', {day:'2-digit', month:'short'})}`
-                      : 'Sin fecha'}
-                  </div>
-                </div>
-                <div style={{display:'flex', gap:'5px'}}>
-                  <button onClick={() => handleScheduleNeedingPatient(p)} title="Agendar" style={{border:'none', background:'#2196F3', color:'white', borderRadius:'4px', cursor:'pointer', fontSize:'14px', padding:'4px 6px'}}>📅</button>
-                  <button onClick={() => handleArchivePatient(p.id, p.fullName)} title="Pausar Seguimiento" style={{border:'none', background:'#9E9E9E', color:'white', borderRadius:'4px', cursor:'pointer', fontSize:'14px', padding:'4px 6px'}}>⏸️</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{marginTop:'auto', borderTop:'1px solid #eee', paddingTop:'15px'}}>
-          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
-            <h4 style={{margin:0, color:'#666'}}> ⏳ Espera ( {waitlist.length})</h4>
-            <button onClick={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true);
-            }} style={{background:'#E3F2FD', color:'#1976D2', border:'none', borderRadius:'50%', width:'24px', height:'24px', cursor:'pointer', fontWeight:'bold'}}>+</button>
-          </div>
-          <div style={{maxHeight:'150px', overflowY:'auto'}}>
-            {waitlist.map(w => (
-              <div key={w.id} style={{fontSize:'12px', padding:'5px', borderBottom:'1px solid #f0f0f0'}}>
-                <div style={{fontWeight:'bold'}}>{w.patientName}</div>
-                <div style={{color:'#888', fontSize:'10px'}}>{w.notes}</div>
-                <button onClick={async () => { if(window.confirm("¿Borrar?")) { await deleteDoc(doc(db, "waitlist", w.id)); loadWaitlist(); }}} style={{border:'none', background:'none', color:'#D32F2F', cursor:'pointer', fontSize:'10px'}}>Borrar</button>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {/* --- ÁREA PRINCIPAL (CALENDARIO) --- */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position:'relative' }}>
 
         {/* BANNER META MENSUAL */}
         <div style={{background: '#673AB7', color: 'white', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)'}}>
@@ -1071,7 +1174,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
               if (!dateObj) return <div key={i} />;
               
               const isToday = dateObj.toDateString() === new Date().toDateString();
-              const isPastDay = dayjs(dateObj).isBefore(dayjs(), 'day'); // VALIDACIÓN NUEVA
+              const isPastDay = dayjs(dateObj).isBefore(dayjs(), 'day');
 
               const dayStr = dateObj.getDate().toString().padStart(2, '0');
               let available = 0; let hasSlots = false;
@@ -1079,8 +1182,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
                 const slots = Object.entries(currentMonthData).filter(([k]) => k.startsWith(`${dayStr}_`));
                 if (slots.length > 0) { 
                   hasSlots = true; 
-                  // FILTRO INTELIGENTE: Si es hoy, filtra por hora. Si es pasado, disponible = 0.
-                  available = slots.filter(([k,v]) => {
+                  available = slots.filter(([,v]) => {
                     if(v.status !== 'available') return false;
                     if(isPastDay) return false;
                     if(isToday) {
@@ -1096,8 +1198,7 @@ export default function AgendaView({ userRole, currentUserId, onBack }: Props) {
               let bg = 'white'; let status = ''; let statusCol = '#999';
               
               if (isPastDay) {
-                bg = '#f9f9f9'; // Gris para días pasados
-                // Sin texto de status
+                bg = '#f9f9f9';
               } else if (hasSlots) {
                 if (available === 0) { bg = '#FFEBEE'; status = 'Agotado'; statusCol = '#D32F2F'; }
                 else { bg = '#E8F5E9'; status = `${available} Espacios Disponibles`; statusCol = '#2E7D32'; }

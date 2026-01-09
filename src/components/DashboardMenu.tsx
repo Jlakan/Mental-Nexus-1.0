@@ -1,6 +1,3 @@
-// src/components/DashboardMenu.tsx
-import React from 'react';
-
 interface Props {
   activeView: string;
   onNavigate: (view: any) => void;
@@ -8,7 +5,6 @@ interface Props {
 }
 
 export default function DashboardMenu({ activeView, onNavigate, onLogout }: Props) {
-  
   // Función auxiliar para saber si un botón debe estar "activo"
   // Nota: Si estamos viendo el detalle de un paciente, mantenemos activo el botón de "Pacientes"
   const isActive = (menuView: string) => {
@@ -76,8 +72,8 @@ export default function DashboardMenu({ activeView, onNavigate, onLogout }: Prop
 
       {/* BOTÓN DE SALIR (Abajo del todo) */}
       <div style={{ borderTop: '1px solid #ECEFF1', paddingTop: '20px' }}>
-        <button 
-          onClick={onLogout} 
+        <button
+          onClick={onLogout}
           style={{
             ...getButtonStyle('logout'), // Reutilizamos estilos base
             background: '#FFEBEE',

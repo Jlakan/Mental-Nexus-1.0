@@ -1,11 +1,9 @@
-import { 
-  differenceInHours, 
-  differenceInDays, 
-  isWithinInterval, 
-  addDays, 
-  getDay, 
-  startOfDay, 
-  isSameDay 
+import {
+  differenceInHours,
+  isWithinInterval,
+  addDays,
+  getDay,
+  startOfDay
 } from 'date-fns';
 
 // ============================================================================
@@ -33,7 +31,7 @@ export interface PatientContextSnapshot {
 export interface CompletionRecord {
   completedAt: Date;       // Fecha real de ejecución (ej. Lunes)
   loggedAt: Date;          // Fecha de registro en app (ej. Jueves -> Check Tardío)
-  timeBlock: TimeBlock;    
+  timeBlock: TimeBlock;
   selfRating?: ValidationRating;
   note?: string;           // Reflexión privada
 }
@@ -45,8 +43,8 @@ export interface PausePeriod {
   startDate: Date;
   endDate?: Date;          // undefined = Pausa activa actualmente
   pausedBy: 'patient' | 'professional';
-  reasonCategory: PauseCategory; 
-  reasonNote?: string;     
+  reasonCategory: PauseCategory;
+  reasonNote?: string;
 }
 
 /**
@@ -68,10 +66,9 @@ export interface Assignment {
 
   contextSnapshot: PatientContextSnapshot;
 
-  assignedAt: Date; 
-  
+  assignedAt: Date;
   // Frecuencia Estandarizada: { "mon": 1, "wed": 2 }
-  frequency?: { [key in DayKey]?: number }; 
+  frequency?: { [key in DayKey]?: number };
 
   completionHistory: CompletionRecord[];
   pauses: PausePeriod[];
@@ -102,7 +99,6 @@ export interface CategoryStat {
   assignedCount: number;
   completedCount: number;      // Tareas finalizadas o con >80% de avance
   totalSuccessScoreSum: number; // Para calcular promedio (Sum / Count)
-  
   // Mapa de calor: ¿Qué arquetipo completa más esta categoría?
   // ej. { "night_owl": 15, "anxious": 2 }
   archetypeCompletionMap: { [archetypeTag: string]: number };
@@ -112,7 +108,6 @@ export interface ProfessionalStatsCache {
   lastUpdated: Date;
   totalActivePatients: number; // Recalculado al vuelo
   totalTasksAssigned: number;
-  
   // Estadísticas desglosadas por categoría
   byCategory: {
     [categoryName: string]: CategoryStat;
@@ -147,8 +142,8 @@ const isDatePaused = (date: Date, pauses: PausePeriod[]): boolean => {
 
 /** Calcula cuántos checks se esperaban teóricamente en un rango de fechas */
 const calculateExpectedCompletions = (
-  start: Date, 
-  end: Date, 
+  start: Date,
+  end: Date,
   frequency: { [key in DayKey]?: number },
   pauses: PausePeriod[]
 ): number => {
@@ -178,15 +173,13 @@ const calculateExpectedCompletions = (
  * Para tareas de una sola vez. Penaliza la tardanza.
  */
 export const calculateAttachmentScore = (
-  assignedAt: Date, 
+  assignedAt: Date,
   record?: CompletionRecord
 ): number => {
   if (!record) return 0;
-  
   // Usamos completedAt (hecho real) para medir disciplina clínica.
   // loggedAt se usaría solo para gamificación (puntos extra), no aquí.
   const latencyHours = Math.abs(differenceInHours(record.completedAt, assignedAt));
-  
   const rawScore = 100 * Math.exp(-DECAY_LAMBDA * latencyHours);
   return Math.round(Math.max(0, Math.min(100, rawScore)));
 };
@@ -198,7 +191,6 @@ export const calculateAttachmentScore = (
 export const calculateRoutineStats = (
   assignment: Assignment
 ): { score: number; intensity: number; flag: 'stable' | 'erratic' | 'cramming' } => {
-  
   // PROTECCIÓN: Asegurar que history y pauses existan
   const history = assignment.completionHistory || [];
   const pauses = assignment.pauses || [];
@@ -209,30 +201,27 @@ export const calculateRoutineStats = (
   // 1. Calcular Intensidad (Volumen Real vs Esperado - Pausas)
   const now = new Date();
   const expectedTotal = calculateExpectedCompletions(
-    assignment.assignedAt, 
-    now, 
-    frequency, 
+    assignment.assignedAt,
+    now,
+    frequency,
     pauses
   );
-  
   const totalCompleted = history.length;
   const intensity = Math.round((totalCompleted / expectedTotal) * 100);
 
   // 2. Calcular Desviación Estándar de Intervalos (Estabilidad del Hábito)
   // Ordenamos cronológicamente por ejecución
   const sortedRecords = [...history].sort((a, b) => a.completedAt.getTime() - b.completedAt.getTime());
-  
   const validIntervals: number[] = [];
-  
   for (let i = 1; i < sortedRecords.length; i++) {
     const current = sortedRecords[i].completedAt;
     const prev = sortedRecords[i-1].completedAt;
-    
+
     // Si hay una pausa válida ENTRE los dos checks, no contamos ese intervalo gigante como "falla".
     // Verificamos el día intermedio
     const midPoint = addDays(prev, 1);
     if (!isDatePaused(midPoint, pauses)) {
-        validIntervals.push(differenceInHours(current, prev));
+      validIntervals.push(differenceInHours(current, prev));
     }
   }
 
@@ -248,7 +237,7 @@ export const calculateRoutineStats = (
 
     if (cv > 1.5) {
       flag = 'cramming'; // Muy irregular
-      scoreBase = 60; 
+      scoreBase = 60;
     } else if (cv > 0.6) {
       flag = 'erratic';
       scoreBase = 80;
@@ -273,17 +262,15 @@ export const calculateRoutineStats = (
  * Función principal llamada por el Frontend o Cloud Functions para ver una tarea.
  */
 export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis => {
-  
   // --- PROTECCIÓN DE DATOS (FIX PARA EVITAR CRASHES) ---
   // Nos aseguramos de que los arrays existan, aunque vengan undefined de Firebase
   const safeHistory = assignment.completionHistory || [];
   const safePauses = assignment.pauses || [];
-  
   // --- A. TAREAS CUSTOM (Saltar lógica clínica) ---
   if (assignment.isCustomTask) {
     const count = safeHistory.length;
     return {
-      successScore: count > 0 ? 100 : 0, 
+      successScore: count > 0 ? 100 : 0,
       intensityPercentage: 100, // Dummy value
       insightMessage: `Tarea personalizada. Completada ${count} veces.`,
       consistencyFlag: 'stable'
@@ -336,7 +323,7 @@ export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis =>
 
   // 4. Pausas (AQUÍ ESTABA EL ERROR DE "undefined")
   const hasActivePause = safePauses.some(p => !p.endDate);
-  if (hasActivePause) insights.push("⏸️ En Pausa Activa.");
+  if (hasActivePause) insights.push( "⏸️ En Pausa Activa." );
 
   return {
     successScore: Math.round(Math.min(100, score)),
@@ -359,7 +346,6 @@ export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis =>
 export const calculateTherapistGlobalStats = (
   allAssignments: Assignment[]
 ): ProfessionalStatsCache => {
-  
   // Estructura base vacía
   const cache: ProfessionalStatsCache = {
     lastUpdated: new Date(),
@@ -373,13 +359,13 @@ export const calculateTherapistGlobalStats = (
 
   for (const task of allAssignments) {
     if(!task) continue; // Protección extra
-    
+
     uniquePatients.add(task.patientId);
 
     // 1. Inicializar categoría si no existe
     // Protección si staticTaskData viene undefined
     const catName = task.staticTaskData?.category || "General";
-    
+
     if (!cache.byCategory[catName]) {
       cache.byCategory[catName] = {
         assignedCount: 0,
@@ -395,14 +381,14 @@ export const calculateTherapistGlobalStats = (
     // 2. Analizar la tarea individualmente
     // IMPORTANTE: Incluso para el agregado usamos la lógica fina (analyzeAssignment)
     const analysis = analyzeAssignment(task);
-    
-    // Consideramos "Completada" para estadísticas globales si el score > 0 
+
+    // Consideramos "Completada" para estadísticas globales si el score > 0
     // o si tiene historial (para custom tasks)
     const isCompletedOrActive = analysis.intensityPercentage > 0;
 
     if (isCompletedOrActive) {
       catStats.completedCount++;
-      
+
       // Solo sumamos al promedio de calidad si NO es tarea custom (para no diluir la data clínica)
       if (!task.isCustomTask) {
         catStats.totalSuccessScoreSum += analysis.successScore;
