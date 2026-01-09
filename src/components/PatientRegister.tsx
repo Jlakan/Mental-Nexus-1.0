@@ -46,36 +46,34 @@ export default function PatientRegister() {
           const profData = profDoc.data();
           const profId = profDoc.id;
           
-          // Obtenemos el tipo pero solo como dato informativo
+          // Obtenemos el tipo como dato informativo
           const professionType = profData.professionType || 'psicologo';
 
           linkedProfessionalCode = cleanCode;
           
-          // Al usar código, requiere aprobación del profesional (aunque lo ponemos active para visibilidad inmediata)
-          // Si prefieres que NO aparezca hasta que tú apruebes, cambia 'active' por 'pending_approval'
-          // Pero para que salga en "Sin Cita" hoy mismo, debe ser 'active'.
+          // Al usar código, requiere aprobación del profesional
           isAuthorizedValue = false; 
 
           // ---------------------------------------------------------
-          // ESTRUCTURA CORREGIDA (PLANA)
+          // ESTRUCTURA CORREGIDA (PLANA) - CRÍTICO PARA LA AGENDA
           // ---------------------------------------------------------
           initialCareTeam = {
             [profId]: {
-              // DATOS PRINCIPALES (Nivel raíz para AgendaView)
-              status: 'active',                  // <--- CRÍTICO: Debe decir 'active'
+              // DATOS PRINCIPALES (Nivel raíz para que el filtro de Agenda funcione)
+              status: 'active',                  // <--- 'active' para que aparezca YA en la lista
               active: true,                      // Flag auxiliar
-              nextAppointment: null,             // <--- CRÍTICO: null = "Sin Cita"
+              nextAppointment: null,             // <--- null asegura que aparezca en "Sin Cita"
               
               // Datos informativos
               joinedAt: new Date().toISOString(),
               professionalName: profData.fullName,
               professionalId: profId,
-              professionType: professionType,    // El rol se guarda como propiedad, no como carpeta
+              professionType: professionType,    // El rol se guarda como propiedad interna
               contactNumber: formData.phone,
               
-              // Inicialización de contadores
+              // Inicialización de contadores y precios
               noShowCount: 0,
-              customPrice: profData.agendaSettings?.defaultPrice || 500 // Precio base del doc
+              customPrice: profData.agendaSettings?.defaultPrice || 500
             }
           };
           // ---------------------------------------------------------
@@ -104,12 +102,15 @@ export default function PatientRegister() {
         linkedProfessionalCode: linkedProfessionalCode,
         isAuthorized: isAuthorizedValue,
 
-        // Flag para identificar origen manual vs app
+        // Flag para identificar origen
         isManual: false 
       });
 
-      // Recargar para entrar a la app
-      window.location.reload();
+      // 3. REDIRECCIÓN FINAL (CORREGIDO)
+      // Usamos href = '/' para forzar una recarga completa en la raíz.
+      // Esto hará que App.tsx verifique de nuevo el usuario en Firebase,
+      // encuentre el perfil recién creado y redirija al Dashboard correcto.
+      window.location.href = '/';
 
     } catch (error: any) {
       console.error("Error al registrar:", error);
