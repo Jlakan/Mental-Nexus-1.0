@@ -1,13 +1,14 @@
-// src/components/PatientDashboard.tsx
-import { useState, useEffect } from 'react'; // Eliminado 'React' (ya no es necesario importarlo en React 17+)
+import { useState, useEffect } from 'react';
 import { 
   doc, getDoc, collection, query, where, getDocs, 
-  updateDoc, increment 
+  updateDoc, increment, deleteField 
 } from "firebase/firestore";
 import { auth, db } from '../services/firebase';
-import { calculateLevel } from '../utils/GamificationUtils'; // Eliminados xpForNextLevel, BASE_STATS
+[cite_start]// [cite: 5] Restauramos xpForNextLevel
+import { calculateLevel, xpForNextLevel } from '../utils/GamificationUtils'; 
 import TaskValidationModal from './TaskValidationModal';
 
+[cite_start]// [cite: 7] Helper para fechas
 const getCurrentWeekDates = () => {
   const current = new Date();
   const day = current.getDay(); 
@@ -23,7 +24,8 @@ const getCurrentWeekDates = () => {
   return week;
 };
 
-// Eliminado DAY_IDS que no se usaba
+[cite_start]// [cite: 20] IMPORTANTE: Restauramos DAY_IDS que se usa en el mapeo de rutinas
+const DAY_IDS = ['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom'];
 const DAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
 interface Props {
@@ -157,9 +159,12 @@ export default function PatientDashboard({ user }: Props) {
   if (loading) return <div style={{padding: '20px'}}>Cargando tu progreso...</div>;
   if (!patientData) return <div style={{padding: '20px'}}>Perfil no encontrado.</div>;
 
-  const { level, requiredXp } = calculateLevel(patientData.gamificationProfile?.currentXp || 0);
+  [cite_start]// [cite: 320, 326] Restauramos la lógica original de nivel que funciona con GamificationUtils actual
   const currentXp = patientData.gamificationProfile?.currentXp || 0;
-  const progressPercent = Math.min(100, (currentXp / requiredXp) * 100); 
+  const level = calculateLevel(currentXp); 
+  const nextLevelXp = xpForNextLevel(level);
+  const prevLevelXp = xpForNextLevel(level - 1);
+  const progressPercent = Math.min(100, Math.max(0, ((currentXp - prevLevelXp) / (nextLevelXp - prevLevelXp)) * 100));
 
   return (
     <div style={{ maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif', background: '#fcfcfc', minHeight: '100vh' }}>
@@ -230,47 +235,52 @@ export default function PatientDashboard({ user }: Props) {
 
               {isRoutine && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '15px' }}>
-                   {/* Eliminado el 'index' que no se usaba */}
-                   {currentWeekDates.map((dateObj) => {
+                   {currentWeekDates.map((dateObj, index) => {
+                      [cite_start]// [cite: 202] Restauramos el uso de DAY_IDS para evitar el crash
+                      const dayId = DAY_IDS[index];
                       const dateKey = dateObj.toISOString().split('T')[0];
-                      const dayLabel = DAY_LABELS[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1]; 
+                      const dayLabel = DAY_LABELS[index];
                       
                       const record = task.completionHistory?.[dateKey];
                       const isSuccess = record?.status === 'success' || record?.status === 'completed';
                       const isEscaped = record?.status === 'escape' || record?.status === 'escaped';
                       
+                      [cite_start]// [cite: 205] Verificación crítica: ¿Está asignada la tarea para este día?
+                      const isAssigned = task.frequency && task.frequency.includes(dayId);
+
                       let bgColor = '#f0f0f0'; 
                       let borderColor = '#ddd';
                       let content = dayLabel;
-                      // Definimos el cursor, y AHORA SÍ lo usaremos abajo
-                      let cursor = 'pointer';
+                      let cursor = 'default';
+                      let opacity = isAssigned ? 1 : 0.3; // Opacidad baja si no toca hoy
 
                       if (isSuccess) {
                         bgColor = '#4CAF50'; 
                         borderColor = '#4CAF50';
                         content = '✓';
-                        cursor = 'default';
                       } else if (isEscaped) {
                         bgColor = '#FF9800'; 
                         borderColor = '#FF9800';
                         content = '🛡️';
-                        cursor = 'default';
-                      } else if (dateObj.toISOString().split('T')[0] === new Date().toISOString().split('T')[0]) {
+                      } else if (dateKey === new Date().toISOString().split('T')[0] && isAssigned) {
                         borderColor = '#2196F3'; 
-                        bgColor = '#white';
+                        bgColor = 'white';
+                        cursor = 'pointer';
+                      } else if (isAssigned) {
+                         // Días asignados pero no hoy (pendientes o pasados)
+                         cursor = 'pointer';
                       }
 
                       return (
                         <div 
                           key={dateKey} 
                           onClick={() => {
-                            if (!isSuccess && !isEscaped) openTaskDecision(task, dateObj);
+                            if (isAssigned && !isSuccess && !isEscaped) openTaskDecision(task, dateObj);
                           }}
                           style={{ 
                             display: 'flex', flexDirection: 'column', alignItems: 'center', 
-                            // AQUÍ ESTABA EL ERROR: Usamos la variable 'cursor' que calculamos arriba
                             cursor: cursor, 
-                            opacity: (dateObj > new Date()) ? 0.5 : 1 
+                            opacity: opacity
                           }}
                         >
                           <div style={{ 
