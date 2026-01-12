@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
-import {
-  collection, query, where, getDocs, doc, updateDoc,
-  arrayRemove, getDoc, increment, deleteDoc, arrayUnion, writeBatch, serverTimestamp
+import { 
+  collection, query, where, getDocs, doc, updateDoc, 
+  arrayRemove, getDoc, increment, deleteDoc, arrayUnion, writeBatch, serverTimestamp 
 } from "firebase/firestore";
 import { auth, db } from '../services/firebase';
-// Importamos la nueva agenda modular
+// Importamos la nueva agenda modular (Asegúrate de que este archivo exista)
 import AgendaView from './agenda';
 import AssignmentModal from './AssignmentModal';
 import HistoryModal from './HistoryModal';
-import DashboardMenu from './DashboardMenu'; 
+import DashboardMenu from './DashboardMenu';
 
 interface Props {
   user: any;
@@ -30,7 +30,7 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
   const [patientTasks, setPatientTasks] = useState<any[]>([]);
 
-  // --- ESTADOS DE FUSIÓN (MERGE) - RECUPERADOS ---
+  // --- ESTADOS DE FUSIÓN (MERGE) ---
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
   const [patientToApprove, setPatientToApprove] = useState<any>(null); // El usuario de la App
   const [manualCandidates, setManualCandidates] = useState<any[]>([]); // Posibles duplicados manuales
@@ -90,16 +90,14 @@ export default function ProfessionalDashboard({ user }: Props) {
               active.push({ id: pId, ...pData });
             }
           });
-          
-          // También cargar pacientes manuales (isManual == true) que ya estén activos
-          // para tenerlos listos en la lista de "active" por si queremos verlos
+
+          // Cargar pacientes manuales activos
           const qManual = query(collection(db, "patients"), where("linkedProfessionalId", "==", user.uid), where("isManual", "==", true));
           const snapManual = await getDocs(qManual);
           snapManual.docs.forEach(d => {
-             // Evitar duplicados si ya vino por el código
-             if(!active.find(p => p.id === d.id)) {
-                 active.push({id: d.id, ...d.data()});
-             }
+            if(!active.find(p => p.id === d.id)) {
+              active.push({id: d.id, ...d.data()});
+            }
           });
 
           setPendingPatients(pending);
@@ -114,17 +112,14 @@ export default function ProfessionalDashboard({ user }: Props) {
   };
 
   // =================================================================
-  // LÓGICA DE FUSIÓN (MERGE) - RECUPERADA Y MEJORADA
+  // LÓGICA DE FUSIÓN (MERGE)
   // =================================================================
 
   const handleOpenApproveModal = (patientApp: any) => {
     setPatientToApprove(patientApp);
-    
-    // Buscar pacientes manuales que se llamen parecido o simplemente todos los manuales
-    // Para simplificar y ser útil, mostramos los manuales activos del profesional
     const candidates = activePatients.filter(p => p.isManual === true);
     setManualCandidates(candidates);
-    setManualIdToMerge(''); // Reset selection
+    setManualIdToMerge(''); 
     setIsMergeModalOpen(true);
   };
 
@@ -135,58 +130,56 @@ export default function ProfessionalDashboard({ user }: Props) {
     try {
       const batch = writeBatch(db);
       const appPatientRef = doc(db, "patients", patientToApprove.id);
-      
-      // Identificar la key correcta en careTeam del App User
+
       let appTeamKey = 'general';
       if (patientToApprove.careTeam) {
         const found = Object.keys(patientToApprove.careTeam).find(k => patientToApprove.careTeam[k].professionalId === user.uid);
         if (found) appTeamKey = found;
       }
 
-      // 1. CASO FUSIÓN: Migrar datos del Manual -> App User
+      // 1. CASO FUSIÓN
       if (shouldMerge && manualIdToMerge) {
         const manualPatient = manualCandidates.find(p => p.id === manualIdToMerge);
         if (!manualPatient) throw new Error("Paciente manual no encontrado");
 
         const manualRef = doc(db, "patients", manualIdToMerge);
 
-        // A. Migrar Indicadores Clínicos (Notas)
+        // A. Migrar Notas
         const manualIndicators = manualPatient.clinicalIndicators?.[user.uid] || [];
         if (manualIndicators.length > 0) {
-            batch.update(appPatientRef, {
-                [`clinicalIndicators.${user.uid}`]: arrayUnion(...manualIndicators)
-            });
+          batch.update(appPatientRef, {
+            [`clinicalIndicators.${user.uid}`]: arrayUnion(...manualIndicators)
+          });
         }
 
-        // B. Migrar Precio Personalizado y Datos de CareTeam
+        // B. Migrar Datos de CareTeam
         const manualTeamData = manualPatient.careTeam?.[user.uid];
         if (manualTeamData) {
-            if(manualTeamData.customPrice) {
-                batch.update(appPatientRef, { [`careTeam.${appTeamKey}.customPrice`]: manualTeamData.customPrice });
-            }
-            if(manualTeamData.noShowCount) {
-                batch.update(appPatientRef, { [`careTeam.${appTeamKey}.noShowCount`]: manualTeamData.noShowCount });
-            }
+           if(manualTeamData.customPrice) {
+             batch.update(appPatientRef, { [`careTeam.${appTeamKey}.customPrice`]: manualTeamData.customPrice });
+           }
+           if(manualTeamData.noShowCount) {
+             batch.update(appPatientRef, { [`careTeam.${appTeamKey}.noShowCount`]: manualTeamData.noShowCount });
+           }
         }
 
-        // C. Actualizar referencias en Colecciones Externas (Misiones y Rutinas)
-        // Nota: Esto requiere lecturas previas.
+        // C. Actualizar Tareas
         const qMissions = query(collection(db, "assigned_missions"), where("patientId", "==", manualIdToMerge));
         const qRoutines = query(collection(db, "assigned_routines"), where("patientId", "==", manualIdToMerge));
         const [snapM, snapR] = await Promise.all([getDocs(qMissions), getDocs(qRoutines)]);
 
         snapM.docs.forEach(docSnap => {
-            batch.update(doc(db, "assigned_missions", docSnap.id), { patientId: patientToApprove.id });
+          batch.update(doc(db, "assigned_missions", docSnap.id), { patientId: patientToApprove.id });
         });
         snapR.docs.forEach(docSnap => {
-            batch.update(doc(db, "assigned_routines", docSnap.id), { patientId: patientToApprove.id });
+          batch.update(doc(db, "assigned_routines", docSnap.id), { patientId: patientToApprove.id });
         });
 
-        // D. Eliminar el Paciente Manual (Para evitar duplicados)
+        // D. Eliminar Manual
         batch.delete(manualRef);
       }
 
-      // 2. ACTIVACIÓN (Común para ambos casos)
+      // 2. ACTIVACIÓN
       batch.update(appPatientRef, {
         isAuthorized: true,
         [`careTeam.${appTeamKey}.active`]: true,
@@ -198,7 +191,7 @@ export default function ProfessionalDashboard({ user }: Props) {
 
       alert(shouldMerge ? "✅ Pacientes fusionados y acceso aprobado." : "✅ Acceso aprobado (Nuevo expediente).");
       setIsMergeModalOpen(false);
-      loadData(); // Recargar todo
+      loadData(); 
 
     } catch (e: any) {
       console.error(e);
@@ -208,9 +201,8 @@ export default function ProfessionalDashboard({ user }: Props) {
     }
   };
 
-
   // =================================================================
-  // LÓGICA DE ASIGNACIÓN (CANDADO) - MANTENIDA
+  // LÓGICA DE ASIGNACIÓN (CANDADO)
   // =================================================================
   const hasValidAttendance = (patient: any): boolean => {
     if (!patient.lastAttendance) return false;
@@ -222,13 +214,13 @@ export default function ProfessionalDashboard({ user }: Props) {
     const diffTime = Math.abs(now.getTime() - dateObj.getTime());
     const diffHours = Math.ceil(diffTime / (1000 * 60 * 60));
 
-    return diffHours <= 72; // Ventana de 3 días
+    return diffHours <= 72; // 3 días
   };
 
   const handleRegisterAttendance = async () => {
     if (!selectedPatient) return;
     const currentBalance = profData?.nexusBalance || 0;
-    if (currentBalance < 1) return alert( "❌ Sin saldo suficiente." );
+    if (currentBalance < 1) return alert("❌ Sin saldo suficiente.");
 
     if (!window.confirm(`¿Registrar asistencia de HOY?\nCosto: 1 Nexus.\nPremio: +1 Nexus al paciente.`)) return;
 
@@ -245,9 +237,8 @@ export default function ProfessionalDashboard({ user }: Props) {
       });
 
       await batch.commit();
-      alert( "✅ Asistencia registrada." );
-      
-      // Update local state optimistic
+      alert("✅ Asistencia registrada.");
+
       setProfData((prev: any) => ({...prev, nexusBalance: prev.nexusBalance - 1}));
       setSelectedPatient((prev: any) => ({
         ...prev,
@@ -322,6 +313,10 @@ export default function ProfessionalDashboard({ user }: Props) {
   // =================================================================
   // RENDERIZADO
   // =================================================================
+  
+  // FIX: Usamos la variable loading para mostrar pantalla de carga
+  if (loading) return <div style={{padding:'50px', textAlign:'center', color:'#666', fontFamily:'sans-serif'}}>Cargando panel profesional...</div>;
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'sans-serif', background: '#F4F6F8' }}>
 
@@ -371,9 +366,8 @@ export default function ProfessionalDashboard({ user }: Props) {
                         <strong>{p.fullName}</strong>
                         <div style={{fontSize:'12px', color:'#666'}}>{p.email}</div>
                       </div>
-                      {/* BOTÓN CAMBIADO A "REVISAR" PARA ACTIVAR MERGE */}
                       <button 
-                        onClick={() => handleOpenApproveModal(p)} 
+                        onClick={() => handleOpenApproveModal(p)}
                         style={{background:'#FF9800', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', cursor:'pointer', fontWeight:'bold'}}
                       >
                         Revisar
@@ -423,15 +417,15 @@ export default function ProfessionalDashboard({ user }: Props) {
           <div style={{textAlign:'center', padding:'40px'}}>
              {/* ... contenido del dashboard dashboard ... */}
              <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'20px'}}>
-              <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #2196F3'}}>
-                <div style={{fontSize:'36px', fontWeight:'bold', color:'#2196F3', marginBottom:'5px'}}>{activePatients.length}</div>
-                <div style={{color:'#546E7A', fontWeight:'bold'}}>Pacientes Activos</div>
-              </div>
-              <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #00BCD4'}}>
-                <div style={{fontSize:'36px', fontWeight:'bold', color:'#00838F', marginBottom:'5px'}}>{profData?.nexusBalance || 0}</div>
-                <div style={{color:'#546E7A', fontWeight:'bold'}}>Nexus Disponibles</div>
-              </div>
-            </div>
+               <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #2196F3'}}>
+                 <div style={{fontSize:'36px', fontWeight:'bold', color:'#2196F3', marginBottom:'5px'}}>{activePatients.length}</div>
+                 <div style={{color:'#546E7A', fontWeight:'bold'}}>Pacientes Activos</div>
+               </div>
+               <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #00BCD4'}}>
+                 <div style={{fontSize:'36px', fontWeight:'bold', color:'#00838F', marginBottom:'5px'}}>{profData?.nexusBalance || 0}</div>
+                 <div style={{color:'#546E7A', fontWeight:'bold'}}>Nexus Disponibles</div>
+               </div>
+             </div>
           </div>
 
         ) : view === 'team' ? (
@@ -442,7 +436,7 @@ export default function ProfessionalDashboard({ user }: Props) {
 
         ) : view === 'patient_detail' && selectedPatient ? (
           <div style={{ paddingBottom: '50px' }}>
-            <button onClick={() => setView('patients_manage')} style={{marginBottom:'20px', background:'none', border:'none', color:'#666', cursor:'pointer', fontSize:'14px', display:'flex', alignItems:'center', gap:'5px'}}>⬅ Volver</button>
+            <button onClick={() => setView('patients_manage')} style={{marginBottom:'20px', background:'none', border:'none', color:'#666', cursor:'pointer', fontSize:'14px', display:'flex', alignItems:'center', gap:'5px'}}> ⬅ Volver </button>
             <div style={{background:'white', padding:'25px', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', marginBottom:'20px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
               <div>
                 <h1 style={{margin:'0 0 5px 0', color:'#1565C0', fontSize:'22px'}}>{selectedPatient.fullName}</h1>
@@ -453,12 +447,13 @@ export default function ProfessionalDashboard({ user }: Props) {
                 </div>
               </div>
               <div style={{display:'flex', flexDirection:'column', gap:'10px', alignItems:'flex-end'}}>
-                <div style={{display:'flex', gap:'10px'}}>
-                  <button onClick={() => setIsHistoryOpen(true)} style={{padding:'10px 15px', background:'#607D8B', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>📜 Historial</button>
-                  <button onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance} style={{padding:'10px 20px', background: hasValidAttendance(selectedPatient) ? '#2196F3' : '#E0E0E0', color: hasValidAttendance(selectedPatient) ? 'white' : '#757575', border: hasValidAttendance(selectedPatient) ? 'none' : '1px solid #ccc', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', display:'flex', alignItems:'center', gap:'8px'}}>
-                    {hasValidAttendance(selectedPatient) ? <>+ Asignar Tarea</> : <>🔒 Registrar Asistencia</>}
-                  </button>
-                </div>
+                 <div style={{display:'flex', gap:'10px'}}>
+                    <button onClick={() => setIsHistoryOpen(true)} style={{padding:'10px 15px', background:'#607D8B', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>📜 Historial</button>
+                    <button onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance} style={{padding:'10px 20px', background: hasValidAttendance(selectedPatient) ? '#2196F3' : '#E0E0E0', color: hasValidAttendance(selectedPatient) ? 
+                      'white' : '#757575', border: hasValidAttendance(selectedPatient) ? 'none' : '1px solid #ccc', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', display:'flex', alignItems:'center', gap:'8px'}}>
+                      {hasValidAttendance(selectedPatient) ? <>+ Asignar Tarea</> : <>🔒 Registrar Asistencia</>}
+                    </button>
+                 </div>
               </div>
             </div>
 
@@ -472,7 +467,7 @@ export default function ProfessionalDashboard({ user }: Props) {
               <div style={{display:'flex', flexWrap:'wrap', gap:'8px'}}>
                 {(selectedPatient.clinicalIndicators?.[user.uid] || []).map((item: string, idx: number) => (
                   <div key={idx} style={{background:'white', border:'1px solid #FFF176', padding:'5px 12px', borderRadius:'20px', fontSize:'14px', color:'#555', display:'flex', alignItems:'center', gap:'8px'}}>
-                    • {item} <button onClick={() => handleDeleteIndicator(item)} style={{border:'none', background:'none', cursor:'pointer', color:'#D32F2F', fontWeight:'bold'}}>✕</button>
+                    • {item} <button onClick={() => handleDeleteIndicator(item)} style={{border:'none', background:'none', cursor:'pointer', color:'#D32F2F', fontWeight:'bold'}}> ✕ </button>
                   </div>
                 ))}
               </div>
@@ -506,7 +501,7 @@ export default function ProfessionalDashboard({ user }: Props) {
 
       </div>
 
-      {/* --- MODAL DE FUSIÓN DE PACIENTES (RECUPERADO) --- */}
+      {/* --- MODAL DE FUSIÓN DE PACIENTES --- */}
       {isMergeModalOpen && patientToApprove && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
           <div style={{ background: 'white', padding: '30px', borderRadius: '12px', width: '500px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
@@ -520,8 +515,8 @@ export default function ProfessionalDashboard({ user }: Props) {
             {manualCandidates.length > 0 ? (
               <div style={{ marginBottom: '20px', background: '#F5F5F5', padding: '15px', borderRadius: '8px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: 'bold', color: '#666' }}>Selecciona el expediente manual a fusionar:</label>
-                <select
-                  value={manualIdToMerge}
+                <select 
+                  value={manualIdToMerge} 
                   onChange={(e) => setManualIdToMerge(e.target.value)}
                   style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
                 >
@@ -533,9 +528,9 @@ export default function ProfessionalDashboard({ user }: Props) {
                   ))}
                 </select>
                 {manualIdToMerge && (
-                   <p style={{fontSize:'12px', color:'#E65100', marginTop:'10px'}}>
-                     ⚠️ Al fusionar, se moverán las notas, misiones y rutinas del paciente manual al nuevo usuario, y <b>se eliminará el registro manual duplicado.</b>
-                   </p>
+                  <p style={{fontSize:'12px', color:'#E65100', marginTop:'10px'}}>
+                    ⚠️ Al fusionar, se moverán las notas, misiones y rutinas del paciente manual al nuevo usuario, y <b>se eliminará el registro manual duplicado.</b>
+                  </p>
                 )}
               </div>
             ) : (
@@ -545,16 +540,16 @@ export default function ProfessionalDashboard({ user }: Props) {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button
+              <button 
                 onClick={() => setIsMergeModalOpen(false)}
                 disabled={processingMerge}
                 style={{ padding: '10px 20px', background: '#ECEFF1', border: 'none', borderRadius: '4px', color: '#546E7A', cursor: 'pointer' }}
               >
                 Cancelar
               </button>
-
+              
               {manualIdToMerge ? (
-                <button
+                <button 
                   onClick={() => handleExecuteMerge(true)}
                   disabled={processingMerge}
                   style={{ padding: '10px 20px', background: '#FF9800', border: 'none', borderRadius: '4px', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
@@ -562,7 +557,7 @@ export default function ProfessionalDashboard({ user }: Props) {
                   {processingMerge ? 'Procesando...' : '🔄 Fusionar y Aprobar'}
                 </button>
               ) : (
-                <button
+                <button 
                   onClick={() => handleExecuteMerge(false)}
                   disabled={processingMerge}
                   style={{ padding: '10px 20px', background: '#4CAF50', border: 'none', borderRadius: '4px', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
