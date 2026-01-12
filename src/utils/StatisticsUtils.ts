@@ -3,7 +3,9 @@ import {
   isWithinInterval,
   addDays,
   getDay,
-  startOfDay
+  startOfDay,
+  differenceInWeeks,
+  differenceInDays
 } from 'date-fns';
 
 // ============================================================================
@@ -27,13 +29,18 @@ export interface PatientContextSnapshot {
 
 /**
  * Registro individual de cumplimiento.
+ * ACTUALIZADO: Soporte para estado y motivo de escape.
  */
 export interface CompletionRecord {
   completedAt: Date;       // Fecha real de ejecución (ej. Lunes)
   loggedAt: Date;          // Fecha de registro en app (ej. Jueves -> Check Tardío)
   timeBlock: TimeBlock;
   selfRating?: ValidationRating;
-  note?: string;           // Reflexión privada
+  note?: string;           // Reflexión privada (o motivo de escape)
+  
+  // Nuevos campos para Core Loop avanzado
+  status?: 'completed' | 'escaped'; 
+  motive?: string;         // ID del motivo de escape (ej. 'anxiety')
 }
 
 /**
@@ -91,6 +98,16 @@ export interface AssignmentAnalysis {
   consistencyFlag?: 'stable' | 'erratic' | 'cramming';
   insightMessage: string;
   pauseImpact?: 'adjusted' | 'none';
+}
+
+/**
+ * NUEVA INTERFAZ: Estadísticas de Supervivencia y Abandono
+ */
+export interface SurvivalStats {
+  lastActiveDate: Date | null;
+  survivalWeeks: number; // Semanas que el paciente "sobrevivió" activo
+  status: 'active' | 'abandoned' | 'completed';
+  daysSinceLastAction: number;
 }
 
 // --- INTERFACES PARA LA AGREGACIÓN (CACHE) ---
@@ -169,6 +186,63 @@ const calculateExpectedCompletions = (
 // ============================================================================
 
 /**
+ * NUEVO MOTOR DE SUPERVIVENCIA
+ * Analiza la "Curva de Supervivencia" del paciente en esta tarea.
+ * Detecta abandono silencioso (>7 días inactivo).
+ */
+export const calculateSurvival = (
+  assignment: Assignment,
+  now: Date = new Date()
+): SurvivalStats => {
+  const history = assignment.completionHistory || [];
+  
+  // 1. Encontrar la última interacción (sea Éxito o Escape)
+  let lastDate: Date | null = null;
+  
+  if (history.length > 0) {
+    // Ordenamos descendente para tomar la más reciente
+    // Copiamos el array para no mutar el original
+    const sorted = [...history].sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime());
+    lastDate = sorted[0].completedAt;
+  } else {
+    // Si no hay historial, la última "actividad" fue la asignación misma
+    lastDate = assignment.assignedAt;
+  }
+
+  // 2. Calcular Métricas Temporales
+  const daysSince = differenceInDays(now, lastDate);
+  const survivalWeeks = differenceInWeeks(lastDate, assignment.assignedAt);
+  
+  // 3. Determinar Estado
+  let status: 'active' | 'abandoned' | 'completed' = 'active';
+
+  // CASO A: Tarea Única (One-Time)
+  if (assignment.type === 'one_time') {
+    const isCompleted = history.some(h => h.status === 'completed' || (!h.status && h.completedAt));
+    if (isCompleted) {
+      status = 'completed';
+    }
+    // Si no está completada y pasó mucho tiempo, podría considerarse abandonada,
+    // pero mantenemos lógica simple por ahora.
+  } 
+  // CASO B: Recurrente (Routine)
+  else {
+    // Lógica de Abandono: Más de 7 días sin actividad
+    // Nota: Si existiera endDate, verificaríamos (lastActiveDate < endDate)
+    if (daysSince > 7) {
+      status = 'abandoned';
+    }
+  }
+
+  return {
+    lastActiveDate: lastDate,
+    survivalWeeks: Math.max(0, survivalWeeks),
+    status,
+    daysSinceLastAction: daysSince
+  };
+};
+
+/**
  * ALGORITMO A: CURVA DE DECAIMIENTO (Latencia)
  * Para tareas de una sola vez. Penaliza la tardanza.
  */
@@ -178,7 +252,6 @@ export const calculateAttachmentScore = (
 ): number => {
   if (!record) return 0;
   // Usamos completedAt (hecho real) para medir disciplina clínica.
-  // loggedAt se usaría solo para gamificación (puntos extra), no aquí.
   const latencyHours = Math.abs(differenceInHours(record.completedAt, assignedAt));
   const rawScore = 100 * Math.exp(-DECAY_LAMBDA * latencyHours);
   return Math.round(Math.max(0, Math.min(100, rawScore)));
@@ -191,12 +264,15 @@ export const calculateAttachmentScore = (
 export const calculateRoutineStats = (
   assignment: Assignment
 ): { score: number; intensity: number; flag: 'stable' | 'erratic' | 'cramming' } => {
-  // PROTECCIÓN: Asegurar que history y pauses existan
   const history = assignment.completionHistory || [];
   const pauses = assignment.pauses || [];
   const frequency = assignment.frequency || {};
 
-  if (history.length === 0) return { score: 0, intensity: 0, flag: 'stable' };
+  // Solo contamos éxitos reales para el score clínico (status !== 'escaped')
+  // Aunque 'escaped' mantiene la racha visual, no suma al "score de eficacia".
+  const effectiveHistory = history.filter(h => h.status !== 'escaped');
+
+  if (effectiveHistory.length === 0) return { score: 0, intensity: 0, flag: 'stable' };
 
   // 1. Calcular Intensidad (Volumen Real vs Esperado - Pausas)
   const now = new Date();
@@ -206,19 +282,16 @@ export const calculateRoutineStats = (
     frequency,
     pauses
   );
-  const totalCompleted = history.length;
+  const totalCompleted = effectiveHistory.length;
   const intensity = Math.round((totalCompleted / expectedTotal) * 100);
 
   // 2. Calcular Desviación Estándar de Intervalos (Estabilidad del Hábito)
-  // Ordenamos cronológicamente por ejecución
-  const sortedRecords = [...history].sort((a, b) => a.completedAt.getTime() - b.completedAt.getTime());
+  const sortedRecords = [...effectiveHistory].sort((a, b) => a.completedAt.getTime() - b.completedAt.getTime());
   const validIntervals: number[] = [];
   for (let i = 1; i < sortedRecords.length; i++) {
     const current = sortedRecords[i].completedAt;
     const prev = sortedRecords[i-1].completedAt;
 
-    // Si hay una pausa válida ENTRE los dos checks, no contamos ese intervalo gigante como "falla".
-    // Verificamos el día intermedio
     const midPoint = addDays(prev, 1);
     if (!isDatePaused(midPoint, pauses)) {
       validIntervals.push(differenceInHours(current, prev));
@@ -233,10 +306,10 @@ export const calculateRoutineStats = (
     const mean = validIntervals.reduce((a, b) => a + b, 0) / validIntervals.length;
     const variance = validIntervals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / validIntervals.length;
     const stdDev = Math.sqrt(variance);
-    const cv = stdDev / (mean + 0.001); // Coeficiente de Variación
+    const cv = stdDev / (mean + 0.001);
 
     if (cv > 1.5) {
-      flag = 'cramming'; // Muy irregular
+      flag = 'cramming';
       scoreBase = 60;
     } else if (cv > 0.6) {
       flag = 'erratic';
@@ -244,10 +317,7 @@ export const calculateRoutineStats = (
     }
   }
 
-  // Ajuste final: Si la intensidad es baja (<50%), el score baja proporcionalmente
-  // (No puedes tener 100 de score si solo hiciste la mitad de la tarea, aunque seas muy estable)
   if (intensity < 100) {
-    // Factor de corrección: Promedio entre la estabilidad (scoreBase) y el volumen (intensity)
     scoreBase = (scoreBase + Math.min(100, intensity)) / 2;
   }
 
@@ -262,16 +332,15 @@ export const calculateRoutineStats = (
  * Función principal llamada por el Frontend o Cloud Functions para ver una tarea.
  */
 export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis => {
-  // --- PROTECCIÓN DE DATOS (FIX PARA EVITAR CRASHES) ---
-  // Nos aseguramos de que los arrays existan, aunque vengan undefined de Firebase
   const safeHistory = assignment.completionHistory || [];
   const safePauses = assignment.pauses || [];
+  
   // --- A. TAREAS CUSTOM (Saltar lógica clínica) ---
   if (assignment.isCustomTask) {
     const count = safeHistory.length;
     return {
       successScore: count > 0 ? 100 : 0,
-      intensityPercentage: 100, // Dummy value
+      intensityPercentage: 100,
       insightMessage: `Tarea personalizada. Completada ${count} veces.`,
       consistencyFlag: 'stable'
     };
@@ -289,7 +358,6 @@ export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis =>
     score = calculateAttachmentScore(assignment.assignedAt, lastRecord);
     intensity = score > 0 ? 100 : 0;
   } else {
-    // Pasamos el assignment, pero dentro de calculateRoutineStats ya protegimos la lectura
     const stats = calculateRoutineStats(assignment);
     score = stats.score;
     intensity = stats.intensity;
@@ -304,14 +372,15 @@ export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis =>
 
   // 3. Gap de Percepción (Validación Humana)
   let perceptionGap: number | undefined;
-  const lastRecord = safeHistory[safeHistory.length - 1];
+  // Buscamos el último record que NO sea escapado y tenga rating
+  const validRecords = safeHistory.filter(h => h.status !== 'escaped' && h.selfRating);
+  const lastRecord = validRecords[validRecords.length - 1];
 
   if (assignment.therapistValidation && lastRecord?.selfRating) {
     const tVal = assignment.therapistValidation.rating;
     const pVal = lastRecord.selfRating;
     perceptionGap = Math.abs(pVal - tVal);
 
-    // Score Final = 40% Algoritmo + 60% Terapeuta
     const validationScore = (tVal / 5) * 100;
     score = (score * 0.4) + (validationScore * 0.6);
 
@@ -321,9 +390,15 @@ export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis =>
     }
   }
 
-  // 4. Pausas (AQUÍ ESTABA EL ERROR DE "undefined")
+  // 4. Pausas
   const hasActivePause = safePauses.some(p => !p.endDate);
-  if (hasActivePause) insights.push( "⏸️ En Pausa Activa." );
+  if (hasActivePause) insights.push("⏸️ En Pausa Activa.");
+  
+  // 5. NUEVO: Alerta de Abandono (Supervivencia)
+  const survival = calculateSurvival(assignment);
+  if (survival.status === 'abandoned') {
+    insights.push(`⚠️ Abandono detectado (Semana ${survival.survivalWeeks}).`);
+  }
 
   return {
     successScore: Math.round(Math.min(100, score)),
@@ -339,31 +414,22 @@ export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis =>
 // 6. AGREGADOR GLOBAL (STATS CACHE)
 // ============================================================================
 
-/**
- * Función PURA que toma todas las asignaciones y genera el objeto de caché
- * para el documento del profesional.
- */
 export const calculateTherapistGlobalStats = (
   allAssignments: Assignment[]
 ): ProfessionalStatsCache => {
-  // Estructura base vacía
   const cache: ProfessionalStatsCache = {
     lastUpdated: new Date(),
     totalTasksAssigned: allAssignments.length,
-    totalActivePatients: 0, // Se debe calcular contando IDs únicos externos o aquí
+    totalActivePatients: 0,
     byCategory: {}
   };
 
-  // Set para contar pacientes únicos en este lote de asignaciones
   const uniquePatients = new Set<string>();
 
   for (const task of allAssignments) {
-    if(!task) continue; // Protección extra
+    if(!task) continue;
 
     uniquePatients.add(task.patientId);
-
-    // 1. Inicializar categoría si no existe
-    // Protección si staticTaskData viene undefined
     const catName = task.staticTaskData?.category || "General";
 
     if (!cache.byCategory[catName]) {
@@ -378,24 +444,16 @@ export const calculateTherapistGlobalStats = (
     const catStats = cache.byCategory[catName];
     catStats.assignedCount++;
 
-    // 2. Analizar la tarea individualmente
-    // IMPORTANTE: Incluso para el agregado usamos la lógica fina (analyzeAssignment)
     const analysis = analyzeAssignment(task);
-
-    // Consideramos "Completada" para estadísticas globales si el score > 0
-    // o si tiene historial (para custom tasks)
     const isCompletedOrActive = analysis.intensityPercentage > 0;
 
     if (isCompletedOrActive) {
       catStats.completedCount++;
 
-      // Solo sumamos al promedio de calidad si NO es tarea custom (para no diluir la data clínica)
       if (!task.isCustomTask) {
         catStats.totalSuccessScoreSum += analysis.successScore;
       }
 
-      // 3. Mapeo de Arquetipos (Insights de Población)
-      // ¿Quiénes completan más este tipo de tarea?
       if (task.contextSnapshot?.archetypes) {
         task.contextSnapshot.archetypes.forEach(tag => {
           if (!catStats.archetypeCompletionMap[tag]) {

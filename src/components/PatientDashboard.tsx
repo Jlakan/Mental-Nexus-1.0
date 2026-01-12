@@ -1,17 +1,21 @@
 // src/components/PatientDashboard.tsx
-import { useState, useEffect } from 'react';
-import { doc, getDoc, collection, query, where, getDocs, updateDoc, increment, deleteField } from "firebase/firestore";
+import React, { useState, useEffect } from 'react';
+import { 
+  doc, getDoc, collection, query, where, getDocs, 
+  updateDoc, increment 
+} from "firebase/firestore";
 import { auth, db } from '../services/firebase';
-import { calculateLevel, xpForNextLevel } from '../utils/GamificationUtils';
+import { calculateLevel, xpForNextLevel, BASE_STATS } from '../utils/GamificationUtils';
+import TaskValidationModal from './TaskValidationModal';
 
-// Helper para obtener las fechas de la semana actual (Lunes a Domingo)
+// --- HELPERS DE FECHAS ---
 const getCurrentWeekDates = () => {
   const current = new Date();
-  const day = current.getDay(); // 0 es Domingo, 1 es Lunes...
+  const day = current.getDay(); // 0=Dom, 1=Lun
   const diffToMonday = current.getDate() - day + (day === 0 ? -6 : 1);
   const monday = new Date(current.setDate(diffToMonday));
   const week = [];
-
+  
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
@@ -28,33 +32,40 @@ interface Props {
 }
 
 export default function PatientDashboard({ user }: Props) {
+  // --- ESTADOS ---
   const [patientData, setPatientData] = useState<any>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Estado para controlar qué tarea se está "jugando"
+  const [selectedTask, setSelectedTask] = useState<{ task: any, dateObj?: Date } | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   const currentUser = user || auth.currentUser;
   const currentWeekDates = getCurrentWeekDates();
 
-  // 1. CARGA DE DATOS
+  // --- CARGA DE DATOS ---
   const loadData = async () => {
     if (!currentUser) return;
     setLoading(true);
     try {
-      const docRef = doc(db, "patients", currentUser.uid);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) setPatientData(docSnap.data());
+      // 1. Perfil del Paciente (Gamificación)
+      const pDoc = await getDoc(doc(db, "patients", currentUser.uid));
+      if (pDoc.exists()) {
+        setPatientData(pDoc.data());
+      }
 
-      const qMissions = query(collection(db, "assigned_missions"), where("patientId", "==", currentUser.uid), where("status", "==", "pending"));
-      const qRoutines = query(collection(db, "assigned_routines"), where("patientId", "==", currentUser.uid));
-
-      const [snapMissions, snapRoutines] = await Promise.all([getDocs(qMissions), getDocs(qRoutines)]);
-
-      const loadedMissions = snapMissions.docs.map(d => ({ id: d.id, ...d.data(), _collection: 'assigned_missions' }));
-      const loadedRoutines = snapRoutines.docs.map(d => ({ id: d.id, ...d.data(), _collection: 'assigned_routines' }));
-
-      setTasks([...loadedMissions, ...loadedRoutines]);
-
+      // 2. Tareas (Misiones y Rutinas)
+      // Nota: En producción, usar índices compuestos para ordenar por fecha
+      const q1 = query(collection(db, "assigned_missions"), where("patientId", "==", currentUser.uid));
+      const q2 = query(collection(db, "assigned_routines"), where("patientId", "==", currentUser.uid));
+      
+      const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+      
+      const missions = snap1.docs.map(d => ({ id: d.id, ...d.data(), type: 'one_time' }));
+      const routines = snap2.docs.map(d => ({ id: d.id, ...d.data(), type: 'daily' }));
+      
+      setTasks([...missions, ...routines]);
     } catch (error) {
       console.error("Error cargando dashboard:", error);
     } finally {
@@ -62,234 +73,282 @@ export default function PatientDashboard({ user }: Props) {
     }
   };
 
-  useEffect(() => { loadData(); }, [currentUser]);
+  useEffect(() => {
+    loadData();
+  }, [currentUser]);
 
-  // 2. COMPLETAR MISIÓN ÚNICA
-  const handleCompleteOneOff = async (task: any) => {
-    if (!currentUser || processingId) return;
-    if (!window.confirm(`¿Completaste "${task.title}"?`)) return;
+  // --- LÓGICA DE INTERACCIÓN ---
 
-    setProcessingId(task.id);
-    try {
-      const patientRef = doc(db, "patients", currentUser.uid);
-      const statUpdate: any = {};
-      if (task.targetStat && task.rewards.statValue) {
-        statUpdate[`gamificationProfile.stats.${task.targetStat}`] = increment(task.rewards.statValue);
+  // 1. Abrir Modal de Decisión
+  const openTaskDecision = (task: any, dateObj?: Date) => {
+    // Validar si es fecha futura (opcional)
+    if (dateObj) {
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const target = new Date(dateObj);
+      target.setHours(0,0,0,0);
+      
+      if (target > today) {
+        alert("🚫 No puedes completar tareas del futuro.");
+        return;
       }
-
-      await updateDoc(patientRef, {
-        "gamificationProfile.currentXp": increment(task.rewards.xp),
-        "gamificationProfile.wallet.gold": increment(task.rewards.gold),
-        "gamificationProfile.wallet.nexus": increment(task.rewards.nexus || 0),
-        ...statUpdate
-      });
-
-      await updateDoc(doc(db, "assigned_missions", task.id), {
-        status: 'completed',
-        completedAt: new Date()
-      });
-
-      alert(`¡Misión Cumplida! +${task.rewards.xp} XP`);
-      loadData();
-    } catch (e) { console.error(e); } finally { setProcessingId(null); }
+    }
+    setSelectedTask({ task, dateObj });
   };
 
-  // 3. CHECKBOX DE RUTINA DIARIA (Corregido: quitamos el argumento dayId)
-  const handleCheckRoutineDay = async (task: any, dateObj: Date) => {
-    if (!currentUser || processingId) return;
-    const dateKey = dateObj.toISOString().split('T')[0];
-    const isCompleted = task.completionHistory?.[dateKey] === true;
+  // 2. Procesar la Decisión (Motor Central)
+  const handleDecision = async (result: { type: 'success' | 'escape', payload: any }) => {
+    if (!currentUser || !selectedTask) return;
     
-    const windowStart = new Date(dateObj);
-    windowStart.setHours(5, 0, 0, 0);
-    const windowEnd = new Date(dateObj);
-    windowEnd.setDate(windowEnd.getDate() + 1);
-    windowEnd.setHours(23, 59, 59, 999);
+    const { task, dateObj } = selectedTask;
+    const isRoutine = task.type === 'daily';
+    const dateKey = dateObj ? dateObj.toISOString().split('T')[0] : null;
+    
+    // Bloquear UI
+    setProcessingId(task.id);
+    setSelectedTask(null); // Cerrar modal
 
-    const now = new Date();
-    if (now < windowStart || now > windowEnd) {
-      alert("⚠️ Fuera de tiempo.\nSolo puedes marcar esta casilla desde las 5:00 AM del día correspondiente hasta las 11:59 PM del día siguiente.");
-      return;
-    }
-
-    setProcessingId(`${task.id}-${dateKey}`);
     try {
       const patientRef = doc(db, "patients", currentUser.uid);
-      const taskRef = doc(db, "assigned_routines", task.id);
+      const taskRef = isRoutine 
+        ? doc(db, "assigned_routines", task.id) 
+        : doc(db, "assigned_missions", task.id);
 
-      if (!isCompleted) {
+      const timestamp = new Date();
+      
+      // Construir el registro de actividad
+      const recordData = {
+        completedAt: timestamp,
+        status: result.type, // 'completed' o 'escaped' manejado abajo
+        ...result.payload // { rating, reflection } OR { motive }
+      };
+
+      // --- A. ACTUALIZAR LA TAREA ---
+      if (isRoutine && dateKey) {
+        // En rutinas, usamos un Mapa por fecha para acceso rápido O(1)
         await updateDoc(taskRef, {
-          [`completionHistory.${dateKey}`]: true,
-          lastUpdated: new Date()
-        });
-
-        await updateDoc(patientRef, {
-          "gamificationProfile.currentXp": increment(task.rewards.xp),
-          "gamificationProfile.wallet.gold": increment(task.rewards.gold)
+          [`completionHistory.${dateKey}`]: {
+             ...recordData,
+             status: result.type // 'success' -> 'completed' mapping si es necesario, pero usaremos 'success'/'escape' interno
+          },
+          lastUpdated: timestamp
         });
       } else {
-        if(!window.confirm("¿Desmarcar? Se retirará la experiencia ganada.")) {
-          setProcessingId(null); return;
-        }
+        // En misiones únicas
         await updateDoc(taskRef, {
-          [`completionHistory.${dateKey}`]: deleteField()
-        });
-
-        await updateDoc(patientRef, {
-          "gamificationProfile.currentXp": increment(-task.rewards.xp),
-          "gamificationProfile.wallet.gold": increment(-task.rewards.gold)
+          status: result.type === 'success' ? 'completed' : 'escaped',
+          completionData: recordData,
+          completedAt: timestamp
         });
       }
 
-      const newTasks = tasks.map(t => {
-        if (t.id === task.id) {
-          const newHistory = { ...t.completionHistory };
-          if (!isCompleted) newHistory[dateKey] = true;
-          else delete newHistory[dateKey];
-          return { ...t, completionHistory: newHistory };
-        }
-        return t;
-      });
-      setTasks(newTasks);
+      // --- B. GAMIFICACIÓN (Solo si hubo Éxito) ---
+      if (result.type === 'success') {
+        const xpBase = task.rewards?.xp || 50;
+        const xpBonus = recordData.reflection ? 10 : 0; // Bonus por reflexión
+        const totalXp = xpBase + xpBonus;
+        
+        const goldGain = task.rewards?.gold || 10;
+        const targetStat = task.targetStat || 'str'; // Default Fuerza
 
-    } catch (error) {
-      console.error(error);
-      alert("Error al actualizar rutina.");
+        // Construir update dinámico para stats
+        const updates: any = {
+          "gamificationProfile.currentXp": increment(totalXp),
+          "gamificationProfile.wallet.gold": increment(goldGain)
+        };
+        
+        // Sumar al stat específico si existe
+        if (task.rewards?.statValue) {
+           updates[`gamificationProfile.stats.${targetStat}`] = increment(task.rewards.statValue);
+        }
+
+        await updateDoc(patientRef, updates);
+        
+        // (Opcional) Feedback visual tipo "Toast"
+        // alert(`¡Genial! +${totalXp} XP`);
+      } else {
+        // Feedback Escape
+        // alert("Racha salvada. ¡Descansa y vuelve con fuerza!");
+      }
+
+      await loadData(); // Recargar UI
+
+    } catch (e) {
+      console.error("Error guardando progreso:", e);
+      alert("Error de conexión. Intenta de nuevo.");
     } finally {
       setProcessingId(null);
     }
   };
 
-  if (loading) return <div style={{padding:'20px', textAlign:'center'}}>Cargando...</div>;
-  if (!patientData) return <div style={{padding:'20px'}}>Error de perfil.</div>;
+  // --- RENDERIZADO ---
+  
+  if (loading) return <div style={{padding: '20px'}}>Cargando tu progreso...</div>;
+  if (!patientData) return <div style={{padding: '20px'}}>Perfil no encontrado.</div>;
 
+  const { level, requiredXp } = calculateLevel(patientData.gamificationProfile?.currentXp || 0);
   const currentXp = patientData.gamificationProfile?.currentXp || 0;
-  const level = calculateLevel(currentXp);
-  const nextLevelXp = xpForNextLevel(level);
-  const prevLevelXp = xpForNextLevel(level - 1);
-  const progressPercent = Math.min(100, Math.max(0, ((currentXp - prevLevelXp) / (nextLevelXp - prevLevelXp)) * 100));
+  const progressPercent = Math.min(100, (currentXp / requiredXp) * 100); // Simplificado para visualización
 
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px', fontFamily: 'sans-serif' }}>
-      <div style={{ background: 'linear-gradient(135deg, #1565C0 0%, #42A5F5 100%)', color: 'white', padding: '25px', borderRadius: '15px', marginBottom: '25px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)' }}>
-        <div style={{display:'flex', justifyContent:'space-between'}}>
+    <div style={{ maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif', background: '#fcfcfc', minHeight: '100vh' }}>
+      
+      {/* 1. HEADER DEL JUGADOR */}
+      <div style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', padding: '20px', borderRadius: '0 0 20px 20px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <div>
-            <h1 style={{margin:0, fontSize:'24px'}}>{patientData.fullName}</h1>
-            <p style={{margin:'5px 0 0 0', opacity:0.9}}>Nivel {level} • Aventurero</p>
+            <h1 style={{ margin: 0, fontSize: '24px' }}>Nivel {level}</h1>
+            <span style={{ fontSize: '14px', opacity: 0.9 }}>{patientData.name || 'Héroe'}</span>
           </div>
-          <div style={{textAlign:'right'}}>
-            <div style={{fontSize:'14px', background:'rgba(0,0,0,0.2)', padding:'5px 10px', borderRadius:'20px', marginBottom:'5px'}}>
-              🟡 {patientData.gamificationProfile?.wallet?.gold || 0} Oro
-            </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '20px', fontWeight: 'bold' }}>💰 {patientData.gamificationProfile?.wallet?.gold || 0}</div>
+            <div style={{ fontSize: '12px' }}>Monedas</div>
           </div>
         </div>
-        <div style={{marginTop:'20px'}}>
-          <div style={{display:'flex', justifyContent:'space-between', fontSize:'12px', marginBottom:'5px'}}>
-            <span>XP: {currentXp}</span>
-            <span>Meta: {nextLevelXp}</span>
-          </div>
-          <div style={{height:'10px', background:'rgba(0,0,0,0.2)', borderRadius:'5px', overflow:'hidden'}}>
-            <div style={{width: `${progressPercent}%`, height:'100%', background:'#FFCA28', transition:'width 0.5s ease'}}></div>
-          </div>
+        
+        {/* Barra de XP */}
+        <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '10px', height: '12px', overflow: 'hidden' }}>
+          <div style={{ width: `${progressPercent}%`, background: '#4CAF50', height: '100%', transition: 'width 0.5s' }} />
+        </div>
+        <div style={{ fontSize: '11px', marginTop: '5px', textAlign: 'right' }}>
+           XP para Nivel {level + 1}
         </div>
       </div>
 
-      <h2 style={{color:'#333', borderBottom:'2px solid #eee', paddingBottom:'10px'}}>📜 Tablón de Misiones</h2>
+      {/* 2. LISTA DE TAREAS */}
+      <div style={{ padding: '20px' }}>
+        <h3 style={{ borderBottom: '2px solid #eee', paddingBottom: '10px', color: '#444' }}>
+          Misiones Activas
+        </h3>
 
-      {tasks.length === 0 ? (
-        <div style={{textAlign:'center', padding:'40px', color:'#777'}}>¡Todo al día!</div>
-      ) : (
-        <div style={{display:'grid', gap:'15px'}}>
-          {tasks.map(task => {
-            const isRoutine = task.type === 'daily';
-            return (
-              <div key={task.id} style={{
-                background:'white', borderRadius:'10px', padding:'15px',
-                borderLeft:`5px solid ${task.themeColor || '#ccc'}`,
-                boxShadow:'0 2px 8px rgba(0,0,0,0.05)'
-              }}>
-                <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
-                  <div style={{flex:1}}>
-                    <span style={{fontSize:'10px', padding:'2px 8px', borderRadius:'4px', color:'white', background: isRoutine ? '#9C27B0' : '#E65100'}}>
-                      {isRoutine ? 'RUTINA' : 'MISIÓN'}
-                    </span>
-                    <h3 style={{margin:'5px 0', fontSize:'18px', color:'#333'}}>{task.title}</h3>
-                    <p style={{margin:'0 0 10px 0', fontSize:'14px', color:'#666'}}>{task.description}</p>
-                    <div style={{display:'flex', gap:'10px', fontSize:'12px', color:'#555', marginBottom: isRoutine?'15px':'0'}}>
-                      <span>⚡ +{task.rewards.xp} XP</span>
-                      <span>💰 +{task.rewards.gold} Oro</span>
-                    </div>
-                  </div>
-                  {!isRoutine && (
-                    <button onClick={() => handleCompleteOneOff(task)} disabled={!!processingId} style={{background: '#4CAF50', color:'white', border:'none', padding:'10px 20px', borderRadius:'8px', cursor:'pointer', fontWeight:'bold'}}>
-                      Completar
-                    </button>
-                  )}
+        {tasks.map(task => {
+          const isRoutine = task.type === 'daily';
+          
+          return (
+            <div key={task.id} style={{ background: 'white', borderRadius: '12px', padding: '15px', marginBottom: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', border: '1px solid #eee' }}>
+              
+              {/* Cabecera de la Tarea */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '16px', color: '#333' }}>{task.staticTaskData?.title || task.title}</h4>
+                  <span style={{ fontSize: '12px', color: '#888', background: '#f0f0f0', padding: '2px 6px', borderRadius: '4px' }}>
+                    {isRoutine ? 'Rutina Diaria' : 'Misión Única'}
+                  </span>
                 </div>
-
-                {isRoutine && (
-                  <div style={{background:'#F5F5F5', padding:'10px', borderRadius:'8px', marginTop:'5px'}}>
-                    <div style={{fontSize:'12px', fontWeight:'bold', marginBottom:'8px', color:'#555', textAlign:'center'}}>SEMANA ACTUAL</div>
-                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                      {currentWeekDates.map((dateObj, index) => {
-                        const dayId = DAY_IDS[index];
-                        const label = DAY_LABELS[index];
-                        const dateKey = dateObj.toISOString().split('T')[0];
-                        const isAssigned = task.frequency && task.frequency.includes(dayId);
-                        const isCompleted = task.completionHistory?.[dateKey] === true;
-
-                        const windowStart = new Date(dateObj); windowStart.setHours(5,0,0,0);
-                        const windowEnd = new Date(dateObj); windowEnd.setDate(windowEnd.getDate()+1); windowEnd.setHours(23,59,59,999);
-                        const now = new Date();
-                        const isTimeOpen = now >= windowStart && now <= windowEnd;
-
-                        let bgColor = '#e0e0e0';
-                        let borderColor = 'transparent';
-                        let cursor = 'default';
-                        let opacity = 0.5;
-
-                        if (isAssigned) {
-                          opacity = 1;
-                          borderColor = task.themeColor || '#9C27B0';
-                          if (isCompleted) bgColor = task.themeColor || '#9C27B0';
-                          else bgColor = 'white';
-                        }
-
-                        if (isTimeOpen && isAssigned) cursor = 'pointer';
-                        else if (!isTimeOpen) opacity = 0.4;
-
-                        return (
-                          <div key={dayId} style={{textAlign:'center', flex:1}}>
-                            <div
-                              onClick={() => isTimeOpen && isAssigned ? handleCheckRoutineDay(task, dateObj) : null}
-                              style={{
-                                width:'35px', height:'35px', borderRadius:'50%', margin:'0 auto',
-                                display:'flex', alignItems:'center', justifyContent:'center',
-                                background: bgColor, border: `2px solid ${borderColor}`,
-                                color: isCompleted && isAssigned ? 'white' : '#555',
-                                fontWeight:'bold', cursor: cursor, opacity: opacity, transition: 'all 0.2s'
-                              }}
-                              title={!isTimeOpen ? `Cerrado. Abre 5am de ${label}` : isAssigned ? "Click para marcar/desmarcar" : "Día libre"}
-                            >
-                              {isCompleted ?  '✓'  : label}
-                            </div>
-                            {dateKey === new Date().toISOString().split('T')[0] && (
-                              <div style={{fontSize:'9px', color:'#2196F3', marginTop:'2px', fontWeight:'bold'}}>HOY</div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
+                {/* Recompensa Visual */}
+                <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#667eea' }}>
+                  +{task.rewards?.xp || 50} XP
+                </div>
               </div>
-            );
-          })}
-        </div>
-      )}
-      <div style={{marginTop:'30px', textAlign:'center'}}>
-        <button onClick={() => auth.signOut()} style={{color:'#d32f2f', background:'none', border:'none', cursor:'pointer', textDecoration:'underline'}}>Cerrar Sesión</button>
+
+              {/* CUERPO: Misión Única */}
+              {!isRoutine && (
+                 <div style={{ marginTop: '10px' }}>
+                    {task.status === 'completed' ? (
+                      <div style={{ padding: '10px', background: '#E8F5E9', color: '#2E7D32', borderRadius: '6px', textAlign: 'center', fontWeight: 'bold' }}>
+                        ✓ Misión Completada
+                      </div>
+                    ) : task.status === 'escaped' ? (
+                      <div style={{ padding: '10px', background: '#FFF3E0', color: '#E65100', borderRadius: '6px', textAlign: 'center', fontWeight: 'bold' }}>
+                        🛡️ Runa Usada
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => openTaskDecision(task)}
+                        disabled={!!processingId}
+                        style={{ width: '100%', padding: '12px', background: '#2196F3', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
+                        Comenzar Misión
+                      </button>
+                    )}
+                 </div>
+              )}
+
+              {/* CUERPO: Rutina (Grid Semanal) */}
+              {isRoutine && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '15px' }}>
+                   {currentWeekDates.map((dateObj, index) => {
+                      const dateKey = dateObj.toISOString().split('T')[0];
+                      const dayLabel = DAY_LABELS[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1]; // Ajuste L-D
+                      
+                      // Buscar historial
+                      const record = task.completionHistory?.[dateKey];
+                      const isSuccess = record?.status === 'success' || record?.status === 'completed';
+                      const isEscaped = record?.status === 'escape' || record?.status === 'escaped';
+                      
+                      // Determinar Color
+                      let bgColor = '#f0f0f0'; // Pendiente
+                      let borderColor = '#ddd';
+                      let content = dayLabel;
+                      let cursor = 'pointer';
+
+                      if (isSuccess) {
+                        bgColor = '#4CAF50'; // Verde Éxito
+                        borderColor = '#4CAF50';
+                        content = '✓';
+                        cursor = 'default';
+                      } else if (isEscaped) {
+                        bgColor = '#FF9800'; // Naranja Escape
+                        borderColor = '#FF9800';
+                        content = '🛡️';
+                        cursor = 'default';
+                      } else if (dateObj.toISOString().split('T')[0] === new Date().toISOString().split('T')[0]) {
+                        borderColor = '#2196F3'; // Hoy (resaltado)
+                        bgColor = '#white';
+                      }
+
+                      return (
+                        <div 
+                          key={dateKey} 
+                          onClick={() => {
+                            if (!isSuccess && !isEscaped) openTaskDecision(task, dateObj);
+                          }}
+                          style={{ 
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', 
+                            cursor: (!isSuccess && !isEscaped) ? 'pointer' : 'default',
+                            opacity: (dateObj > new Date()) ? 0.5 : 1 // Fechas futuras semitransparentes
+                          }}
+                        >
+                          <div style={{ 
+                            width: '32px', height: '32px', borderRadius: '50%', 
+                            background: bgColor, border: `2px solid ${borderColor}`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: (isSuccess || isEscaped) ? 'white' : '#555',
+                            fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s'
+                          }}>
+                            {content}
+                          </div>
+                          <span style={{ fontSize: '10px', color: '#999', marginTop: '4px' }}>{dayLabel}</span>
+                        </div>
+                      );
+                   })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        
+        {tasks.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>
+            No tienes misiones asignadas hoy. ¡Relájate! 🍃
+          </div>
+        )}
       </div>
+
+      {/* 3. MODAL DE DECISIÓN (Se renderiza condicionalmente) */}
+      <TaskValidationModal
+        isOpen={!!selectedTask}
+        taskTitle={selectedTask?.task?.staticTaskData?.title || selectedTask?.task?.title || "Misión"}
+        onClose={() => setSelectedTask(null)}
+        onConfirmSuccess={(rating, reflection) => handleDecision({ type: 'success', payload: { rating, reflection } })}
+        onConfirmEscape={(reasonId) => handleDecision({ type: 'escape', payload: { motive: reasonId } })}
+      />
+
+      <div style={{ marginTop: '30px', textAlign: 'center', paddingBottom: '30px' }}>
+         <button onClick={() => auth.signOut()} style={{ color: '#d32f2f', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+           Cerrar Sesión
+         </button>
+      </div>
+
     </div>
   );
 }

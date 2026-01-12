@@ -1,14 +1,16 @@
 // src/utils/GamificationUtils.ts
 
-// 1. Definición de los Niveles de Misión (Tiers)
-// Esto centraliza cuánto XP y Oro da cada tipo de tarea.
+// ============================================================================
+// 1. DEFINICIÓN DE NIVELES DE MISIÓN (TIERS)
+// Centraliza XP, Oro y Moneda Premium por dificultad
+// ============================================================================
 export const MISSION_TIERS = {
   EASY: {
     id: 'easy',
     label: 'Rutina (Fácil)',
     xp: 50,
     gold: 10,
-    nexus: 0, // Moneda premium
+    nexus: 0, 
     color: '#81C784', // Verde claro
   },
   MEDIUM: {
@@ -36,22 +38,25 @@ export const MISSION_TIERS = {
     color: '#E91E63', // Rosa/Rojo
   },
 };
-// 2. Definición de Stats Base (Atributos del Personaje)
-// Puedes cambiar estos nombres según el enfoque clínico (ej: Resiliencia, Enfoque)
-// o dejarlos estilo RPG clásico.
+
+// ============================================================================
+// 2. STATS BASE (ATRIBUTOS DEL PERSONAJE)
+// ============================================================================
 export const BASE_STATS = {
   STR: { code: 'str', label: 'Fuerza (Voluntad)', value: 10 },
   INT: { code: 'int', label: 'Intelecto (Cognición)', value: 10 },
   STA: { code: 'sta', label: 'Resistencia (Emocional)', value: 10 },
   CHA: { code: 'cha', label: 'Carisma (Social)', value: 10 },
 };
-// 3. Constantes Iniciales para nuevos jugadores
+
+// ============================================================================
+// 3. PERFIL INICIAL (NUEVOS JUGADORES)
+// ============================================================================
 export const INITIAL_PLAYER_PROFILE = {
   level: 1,
   currentXp: 0,
-  gold: 0, // Billetera común
-  nexus: 0, // Billetera premium
-  // Copiamos los valores base
+  gold: 0, 
+  nexus: 0,
   stats: {
     str: 10,
     int: 10,
@@ -59,16 +64,59 @@ export const INITIAL_PLAYER_PROFILE = {
     cha: 10,
   },
 };
-// 4. Fórmula para calcular el Nivel basado en la XP acumulada
-// Nivel = 1 + raíz cuadrada(XP) * factor (ajustable)
-export const calculateLevel = (xp: number): number => {
-  if (xp === 0) return 1;
-  // Esta fórmula hace que subir de nivel sea progresivamente más difícil
-  return Math.floor(1 + Math.sqrt(xp) * 0.1);
+
+// ============================================================================
+// 4. MOTORES DE CÁLCULO (LEVEL UP)
+// ============================================================================
+
+/**
+ * Calcula la XP necesaria para alcanzar el siguiente nivel.
+ * Fórmula cuadrática simple: Base * (Nivel ^ Exponente)
+ */
+export const xpForNextLevel = (level: number) => {
+  const baseXP = 100;
+  const exponent = 1.5;
+  return Math.floor(baseXP * Math.pow(level, exponent));
 };
-// 5. Fórmula para saber cuánta XP falta para el siguiente nivel
-export const xpForNextLevel = (currentLevel: number): number => {
-  // Inversa de la fórmula anterior
-  // XP = ((Nivel - 1) / 0.1) ^ 2
-  return Math.pow(currentLevel / 0.1, 2);
+
+/**
+ * Calcula el nivel actual basado en la XP total acumulada.
+ * Retorna objeto con nivel actual y progreso hacia el siguiente.
+ */
+export const calculateLevel = (totalXp: number) => {
+  let level = 1;
+  while (totalXp >= xpForNextLevel(level)) {
+    totalXp -= xpForNextLevel(level);
+    level++;
+  }
+  return {
+    level,
+    currentLevelXp: totalXp,
+    requiredXp: xpForNextLevel(level)
+  };
+};
+
+// ============================================================================
+// 5. CONSTANTES PARA EL SISTEMA DE ESCAPE (NUEVO)
+// Estandariza los motivos para permitir análisis de datos posteriores
+// ============================================================================
+export const ESCAPE_REASONS = [
+  { id: 'fatigue', label: 'Fatiga Física Extrema' },
+  { id: 'anxiety', label: 'Parálisis por Ansiedad / Miedo' },
+  { id: 'time', label: 'Conflicto de Horario (Fuerza Mayor)' },
+  { id: 'pain', label: 'Dolor o Malestar Físico' },
+  { id: 'mood', label: 'Bajo Estado de Ánimo / Depresión' },
+  { id: 'boredom', label: 'Falta de Interés / Aburrimiento' }
+];
+
+// ============================================================================
+// 6. CONFIGURACIÓN DE VALIDACIÓN (FEEDBACK) (NUEVO)
+// Etiquetas visuales para la escala de esfuerzo 1-5
+// ============================================================================
+export const VALIDATION_LABELS: Record<number, string> = {
+  1: "Muy Difícil / Agotador",
+  2: "Difícil pero posible",
+  3: "Moderado / Normal",
+  4: "Llevadero",
+  5: "¡Salió genial / Fácil!"
 };

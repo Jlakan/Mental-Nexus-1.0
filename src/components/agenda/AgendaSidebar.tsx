@@ -1,0 +1,153 @@
+import React from 'react';
+
+interface AgendaSidebarProps {
+  onBack?: () => void;
+  onOpenConfig: () => void;
+  onOpenEvents: () => void;
+  isMonthInitialized: boolean;
+  onRegenerate: () => void;
+  onInitialize: () => void;
+  // Estados de Paneles
+  activeSidePanel: 'none' | 'needing' | 'waitlist';
+  setActiveSidePanel: (panel: 'none' | 'needing' | 'waitlist') => void;
+  isPausedSidebarOpen: boolean;
+  setIsPausedSidebarOpen: (open: boolean) => void;
+  // Datos
+  patientsNeedingAppt: any[];
+  waitlist: any[];
+  pausedList: any[];
+  // Funciones de acción
+  onOpenPausedSidebar: () => void;
+  onScheduleNeeding: (p: any) => void;
+  onArchivePatient: (id: string, name: string) => void;
+  onAddWaitlist: () => void;
+  onDeleteWaitlist: (id: string) => void;
+  onReactivatePatient: (id: string, name: string) => void;
+}
+
+const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
+  onBack, onOpenConfig, onOpenEvents, isMonthInitialized, onRegenerate, onInitialize,
+  activeSidePanel, setActiveSidePanel, isPausedSidebarOpen, setIsPausedSidebarOpen,
+  patientsNeedingAppt, waitlist, pausedList,
+  onOpenPausedSidebar, onScheduleNeeding, onArchivePatient, onAddWaitlist, onDeleteWaitlist, onReactivatePatient
+}) => {
+  return (
+    <div style={{ width: '280px', background: 'white', borderRight: '1px solid #ddd', display:'flex', flexDirection:'column', zIndex: 20, position: 'relative', boxShadow: '2px 0 5px rgba(0,0,0,0.05)' }}>
+      
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+        <h3 style={{marginTop:0, color:'#333'}}>Opciones</h3>
+        {onBack && <button onClick={onBack} style={{marginBottom:'20px', width:'100%', padding:'10px', cursor:'pointer', border:'1px solid #ccc', background:'white', borderRadius:'6px'}}> ⬅ Volver </button>}
+
+        <button onClick={onOpenConfig} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'white', border:'1px solid #ccc', borderRadius:'6px', cursor:'pointer', textAlign:'left'}}>⚙️ Configurar</button>
+        <button onClick={onOpenEvents} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'#F3E5F5', border:'1px solid #E1BEE7', color:'#7B1FA2', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', textAlign:'left'}}>📅 Mis Eventos</button>
+
+        {isMonthInitialized ? (
+          <button onClick={onRegenerate} style={{width:'100%', marginBottom:'20px', padding:'10px', background:'#FFF3E0', border:'1px solid #FFB74D', color:'#E65100', borderRadius:'6px', cursor:'pointer', textAlign:'left'}}>🔄 Actualizar Espacios</button>
+        ) : (
+          <button onClick={onInitialize} style={{width:'100%', marginBottom:'20px', padding:'10px', background:'#FF9800', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', textAlign:'left'}}>⚡ Inicializar Mes</button>
+        )}
+
+        <div style={{borderTop:'1px solid #eee', margin:'10px 0'}}></div>
+
+        {/* Botón Sin Cita */}
+        <button
+          onClick={() => { setActiveSidePanel(activeSidePanel === 'needing' ? 'none' : 'needing'); setIsPausedSidebarOpen(false); }}
+          style={{
+            width:'100%', padding:'12px', marginBottom:'10px', borderRadius:'8px', cursor:'pointer',
+            display:'flex', justifyContent:'space-between', alignItems:'center',
+            background: activeSidePanel === 'needing' ? '#FFEBEE' : 'white',
+            border: activeSidePanel === 'needing' ? '2px solid #EF5350' : '1px solid #eee',
+            color: activeSidePanel === 'needing' ? '#D32F2F' : '#555'
+          }}
+        >
+          <span style={{fontWeight:'bold'}}>⚠️ Sin Cita</span>
+          <span style={{background:'#D32F2F', color:'white', borderRadius:'12px', padding:'2px 8px', fontSize:'11px'}}>{patientsNeedingAppt.length}</span>
+        </button>
+
+        {/* Botón Lista Espera */}
+        <button
+          onClick={() => { setActiveSidePanel(activeSidePanel === 'waitlist' ? 'none' : 'waitlist'); setIsPausedSidebarOpen(false); }}
+          style={{
+            width:'100%', padding:'12px', marginBottom:'10px', borderRadius:'8px', cursor:'pointer',
+            display:'flex', justifyContent:'space-between', alignItems:'center',
+            background: activeSidePanel === 'waitlist' ? '#E3F2FD' : 'white',
+            border: activeSidePanel === 'waitlist' ? '2px solid #2196F3' : '1px solid #eee',
+            color: activeSidePanel === 'waitlist' ? '#1976D2' : '#555'
+          }}
+        >
+          <span style={{fontWeight:'bold'}}>⏳ Lista de Espera</span>
+          <span style={{background:'#1976D2', color:'white', borderRadius:'12px', padding:'2px 8px', fontSize:'11px'}}>{waitlist.length}</span>
+        </button>
+
+        {/* Botón Pausados */}
+        <button
+          onClick={onOpenPausedSidebar}
+          style={{
+            width:'100%', padding:'12px', marginTop:'10px', borderRadius:'8px', cursor:'pointer',
+            display:'flex', justifyContent:'space-between', alignItems:'center',
+            background: isPausedSidebarOpen ? '#F5F5F5' : 'white',
+            border: isPausedSidebarOpen ? '2px solid #9E9E9E' : '1px solid #eee',
+            color: isPausedSidebarOpen ? '#616161' : '#757575'
+          }}
+        >
+          <span style={{fontWeight:'bold'}}>⏸️ Ver Pausados</span>
+          {pausedList.length > 0 && (
+            <span style={{background:'#9E9E9E', color:'white', borderRadius:'12px', padding:'2px 8px', fontSize:'11px'}}>{pausedList.length}</span>
+          )}
+        </button>
+      </div>
+
+      {/* PANELES DESPLEGABLES (Lógica visual del sidebar) */}
+      {activeSidePanel !== 'none' && (
+        <div style={{ position: 'absolute', left: '100%', top: 0, bottom: 0, width: '320px', background: 'white', boxShadow: '5px 0 15px rgba(0,0,0,0.1)', zIndex: 19, borderRight: '1px solid #ddd', display: 'flex', flexDirection: 'column' }}>
+          <div style={{padding:'20px', borderBottom:'1px solid #eee', background:'#fafafa', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <h3 style={{margin:0, color:'#333'}}>{activeSidePanel === 'needing' ? '⚠️ Requieren Cita' : '⏳ Lista de Espera'}</h3>
+            <button onClick={() => setActiveSidePanel('none')} style={{border:'none', background:'none', fontSize:'18px', cursor:'pointer', color:'#999'}}>✕</button>
+          </div>
+          <div style={{flex:1, overflowY:'auto', padding:'10px'}}>
+             {activeSidePanel === 'needing' ? (
+                patientsNeedingAppt.map(p => (
+                  <div key={p.id} onClick={() => onScheduleNeeding(p)} style={{background:'white', border:'1px solid #eee', marginBottom:'8px', padding:'12px', borderRadius:'8px', cursor:'pointer'}}>
+                    <strong style={{fontSize:'14px'}}>{p.fullName}</strong>
+                    <div style={{marginTop:'10px', textAlign:'right'}}>
+                      <button onClick={(e) => { e.stopPropagation(); onArchivePatient(p.id, p.fullName); }} style={{fontSize:'11px', padding:'4px 8px', cursor:'pointer'}}>Pausar</button>
+                    </div>
+                  </div>
+                ))
+             ) : (
+                <>
+                  <button onClick={onAddWaitlist} style={{width:'100%', marginBottom:'10px', padding:'8px', background:'#1976D2', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>+ Agregar a Espera</button>
+                  {waitlist.map(w => (
+                    <div key={w.id} style={{background:'white', border:'1px solid #eee', borderLeft:'4px solid #FFA000', padding:'10px', marginBottom:'8px'}}>
+                      <div style={{fontWeight:'bold'}}>{w.patientName}</div>
+                      <button onClick={() => onDeleteWaitlist(w.id)} style={{color:'red', border:'none', background:'none', cursor:'pointer', fontSize:'11px'}}>Eliminar</button>
+                    </div>
+                  ))}
+                </>
+             )}
+          </div>
+        </div>
+      )}
+
+      {/* PANEL DE PAUSADOS */}
+      {isPausedSidebarOpen && (
+        <div style={{ position: 'absolute', left: '100%', top: 0, bottom: 0, width: '320px', background: 'white', boxShadow: '5px 0 15px rgba(0,0,0,0.1)', zIndex: 100, borderRight: '1px solid #ddd', display: 'flex', flexDirection: 'column' }}>
+          <div style={{padding:'20px', borderBottom:'1px solid #eee', background:'#fafafa', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <h3 style={{margin:0, color:'#616161', fontSize:'16px'}}>Pacientes Pausados</h3>
+            <button onClick={() => setIsPausedSidebarOpen(false)} style={{border:'none', background:'none', fontSize:'18px', cursor:'pointer', color:'#999'}}>✕</button>
+          </div>
+          <div style={{flex:1, overflowY:'auto', padding:'10px'}}>
+            {pausedList.map(p => (
+              <div key={p.id} style={{background:'white', border:'1px solid #eee', borderLeft:'4px solid #BDBDBD', padding:'12px', marginBottom:'8px'}}>
+                <div style={{fontWeight:'bold'}}>{p.fullName}</div>
+                <button onClick={() => onReactivatePatient(p.id, p.fullName)} style={{width:'100%', marginTop:'10px', padding:'8px', background:'#4CAF50', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>🔄 Reactivar</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AgendaSidebar;

@@ -4,7 +4,8 @@ import {
   arrayRemove, getDoc, increment, deleteDoc, arrayUnion, writeBatch, serverTimestamp
 } from "firebase/firestore";
 import { auth, db } from '../services/firebase';
-import AgendaView from './AgendaView';
+// Importamos la nueva agenda modular
+import AgendaView from './agenda';
 import AssignmentModal from './AssignmentModal';
 import HistoryModal from './HistoryModal';
 import DashboardMenu from './DashboardMenu'; 
@@ -21,13 +22,20 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [assistants, setAssistants] = useState<any[]>([]);
   const [activePatients, setActivePatients] = useState<any[]>([]);
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
-  const [, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [profData, setProfData] = useState<any>(null);
 
   // --- ESTADOS PACIENTE ---
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
   const [patientTasks, setPatientTasks] = useState<any[]>([]);
+
+  // --- ESTADOS DE FUSIÓN (MERGE) - RECUPERADOS ---
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [patientToApprove, setPatientToApprove] = useState<any>(null); // El usuario de la App
+  const [manualCandidates, setManualCandidates] = useState<any[]>([]); // Posibles duplicados manuales
+  const [manualIdToMerge, setManualIdToMerge] = useState<string>(''); // ID seleccionado para fusionar
+  const [processingMerge, setProcessingMerge] = useState(false);
 
   // --- MODALS ---
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
@@ -70,7 +78,6 @@ export default function ProfessionalDashboard({ user }: Props) {
             const pData = d.data();
             const pId = d.id;
 
-            // Verificar si soy el médico activo en su CareTeam
             let isMyPatientActive = false;
             if (pData.careTeam) {
               const myEntry = Object.values(pData.careTeam).find((entry: any) => entry.professionalId === user.uid);
@@ -82,6 +89,17 @@ export default function ProfessionalDashboard({ user }: Props) {
             } else {
               active.push({ id: pId, ...pData });
             }
+          });
+          
+          // También cargar pacientes manuales (isManual == true) que ya estén activos
+          // para tenerlos listos en la lista de "active" por si queremos verlos
+          const qManual = query(collection(db, "patients"), where("linkedProfessionalId", "==", user.uid), where("isManual", "==", true));
+          const snapManual = await getDocs(qManual);
+          snapManual.docs.forEach(d => {
+             // Evitar duplicados si ya vino por el código
+             if(!active.find(p => p.id === d.id)) {
+                 active.push({id: d.id, ...d.data()});
+             }
           });
 
           setPendingPatients(pending);
@@ -95,7 +113,105 @@ export default function ProfessionalDashboard({ user }: Props) {
     }
   };
 
-  // --- LÓGICA DE ASIGNACIÓN (El Candado) ---
+  // =================================================================
+  // LÓGICA DE FUSIÓN (MERGE) - RECUPERADA Y MEJORADA
+  // =================================================================
+
+  const handleOpenApproveModal = (patientApp: any) => {
+    setPatientToApprove(patientApp);
+    
+    // Buscar pacientes manuales que se llamen parecido o simplemente todos los manuales
+    // Para simplificar y ser útil, mostramos los manuales activos del profesional
+    const candidates = activePatients.filter(p => p.isManual === true);
+    setManualCandidates(candidates);
+    setManualIdToMerge(''); // Reset selection
+    setIsMergeModalOpen(true);
+  };
+
+  const handleExecuteMerge = async (shouldMerge: boolean) => {
+    if (!patientToApprove) return;
+    setProcessingMerge(true);
+
+    try {
+      const batch = writeBatch(db);
+      const appPatientRef = doc(db, "patients", patientToApprove.id);
+      
+      // Identificar la key correcta en careTeam del App User
+      let appTeamKey = 'general';
+      if (patientToApprove.careTeam) {
+        const found = Object.keys(patientToApprove.careTeam).find(k => patientToApprove.careTeam[k].professionalId === user.uid);
+        if (found) appTeamKey = found;
+      }
+
+      // 1. CASO FUSIÓN: Migrar datos del Manual -> App User
+      if (shouldMerge && manualIdToMerge) {
+        const manualPatient = manualCandidates.find(p => p.id === manualIdToMerge);
+        if (!manualPatient) throw new Error("Paciente manual no encontrado");
+
+        const manualRef = doc(db, "patients", manualIdToMerge);
+
+        // A. Migrar Indicadores Clínicos (Notas)
+        const manualIndicators = manualPatient.clinicalIndicators?.[user.uid] || [];
+        if (manualIndicators.length > 0) {
+            batch.update(appPatientRef, {
+                [`clinicalIndicators.${user.uid}`]: arrayUnion(...manualIndicators)
+            });
+        }
+
+        // B. Migrar Precio Personalizado y Datos de CareTeam
+        const manualTeamData = manualPatient.careTeam?.[user.uid];
+        if (manualTeamData) {
+            if(manualTeamData.customPrice) {
+                batch.update(appPatientRef, { [`careTeam.${appTeamKey}.customPrice`]: manualTeamData.customPrice });
+            }
+            if(manualTeamData.noShowCount) {
+                batch.update(appPatientRef, { [`careTeam.${appTeamKey}.noShowCount`]: manualTeamData.noShowCount });
+            }
+        }
+
+        // C. Actualizar referencias en Colecciones Externas (Misiones y Rutinas)
+        // Nota: Esto requiere lecturas previas.
+        const qMissions = query(collection(db, "assigned_missions"), where("patientId", "==", manualIdToMerge));
+        const qRoutines = query(collection(db, "assigned_routines"), where("patientId", "==", manualIdToMerge));
+        const [snapM, snapR] = await Promise.all([getDocs(qMissions), getDocs(qRoutines)]);
+
+        snapM.docs.forEach(docSnap => {
+            batch.update(doc(db, "assigned_missions", docSnap.id), { patientId: patientToApprove.id });
+        });
+        snapR.docs.forEach(docSnap => {
+            batch.update(doc(db, "assigned_routines", docSnap.id), { patientId: patientToApprove.id });
+        });
+
+        // D. Eliminar el Paciente Manual (Para evitar duplicados)
+        batch.delete(manualRef);
+      }
+
+      // 2. ACTIVACIÓN (Común para ambos casos)
+      batch.update(appPatientRef, {
+        isAuthorized: true,
+        [`careTeam.${appTeamKey}.active`]: true,
+        [`careTeam.${appTeamKey}.status`]: 'active',
+        [`careTeam.${appTeamKey}.joinedAt`]: new Date().toISOString()
+      });
+
+      await batch.commit();
+
+      alert(shouldMerge ? "✅ Pacientes fusionados y acceso aprobado." : "✅ Acceso aprobado (Nuevo expediente).");
+      setIsMergeModalOpen(false);
+      loadData(); // Recargar todo
+
+    } catch (e: any) {
+      console.error(e);
+      alert("Error en el proceso: " + e.message);
+    } finally {
+      setProcessingMerge(false);
+    }
+  };
+
+
+  // =================================================================
+  // LÓGICA DE ASIGNACIÓN (CANDADO) - MANTENIDA
+  // =================================================================
   const hasValidAttendance = (patient: any): boolean => {
     if (!patient.lastAttendance) return false;
     const myLastDate = patient.lastAttendance[user.uid];
@@ -111,25 +227,16 @@ export default function ProfessionalDashboard({ user }: Props) {
 
   const handleRegisterAttendance = async () => {
     if (!selectedPatient) return;
-
     const currentBalance = profData?.nexusBalance || 0;
-    if (currentBalance < 1) {
-      return alert("❌ No tienes Nexus suficientes. Mejora tu suscripción para premiar asistencias.");
-    }
+    if (currentBalance < 1) return alert( "❌ Sin saldo suficiente." );
 
-    if (!window.confirm(`¿Registrar asistencia de HOY y desbloquear asignación?\n\nCosto: 1 Nexus de tu saldo.\nPremio: +1 Nexus al paciente.`)) return;
+    if (!window.confirm(`¿Registrar asistencia de HOY?\nCosto: 1 Nexus.\nPremio: +1 Nexus al paciente.`)) return;
 
     try {
       const batch = writeBatch(db);
-
-      // 1. Cobrar al Profesional
       const profRef = doc(db, "professionals", user.uid);
-      batch.update(profRef, {
-        nexusBalance: increment(-1),
-        "metrics.nexusDistributed": increment(1)
-      });
+      batch.update(profRef, { nexusBalance: increment(-1), "metrics.nexusDistributed": increment(1) });
 
-      // 2. Premiar y Registrar Fecha en Paciente
       const patRef = doc(db, "patients", selectedPatient.id);
       batch.update(patRef, {
         [`lastAttendance.${user.uid}`]: serverTimestamp(),
@@ -138,34 +245,22 @@ export default function ProfessionalDashboard({ user }: Props) {
       });
 
       await batch.commit();
-      alert("✅ Asistencia registrada. ¡Asignación desbloqueada!");
-
-      // --- ACTUALIZACIÓN OPTIMISTA ---
-      setProfData((prev: any) => ({ ...prev, nexusBalance: prev.nexusBalance - 1 }));
-
+      alert( "✅ Asistencia registrada." );
+      
+      // Update local state optimistic
+      setProfData((prev: any) => ({...prev, nexusBalance: prev.nexusBalance - 1}));
       setSelectedPatient((prev: any) => ({
         ...prev,
-        lastAttendance: { ...prev.lastAttendance, [user.uid]: new Date() },
-        gamificationProfile: {
-          ...prev.gamificationProfile,
-          wallet: { ...prev.gamificationProfile.wallet, nexus: (prev.gamificationProfile.wallet.nexus || 0) + 1 }
-        }
+        lastAttendance: { ...prev.lastAttendance, [user.uid]: new Date() }
       }));
-
-      // Abrir modal directamente
       setTaskToEdit(null);
       setIsAssignmentModalOpen(true);
 
-    } catch (e) {
-      console.error(e);
-      alert("Error en la transacción.");
-    }
+    } catch (e) { console.error(e); }
   };
 
   const handleOpenCreateTask = () => {
-    if (!hasValidAttendance(selectedPatient)) {
-      return handleRegisterAttendance();
-    }
+    if (!hasValidAttendance(selectedPatient)) return handleRegisterAttendance();
     setTaskToEdit(null);
     setIsAssignmentModalOpen(true);
   };
@@ -186,24 +281,16 @@ export default function ProfessionalDashboard({ user }: Props) {
     try {
       const qM = query(collection(db, "assigned_missions"), where("patientId", "==", patientId));
       const qR = query(collection(db, "assigned_routines"), where("patientId", "==", patientId));
-
       const [snapM, snapR] = await Promise.all([getDocs(qM), getDocs(qR)]);
-
       const missions = snapM.docs.map(d => ({ id: d.id, ...d.data(), type: 'mission' }));
       const routines = snapR.docs.map(d => ({ id: d.id, ...d.data(), type: 'routine' }));
-
-      const all = [...missions, ...routines].sort((a: any, b: any) => {
-        const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date();
-        const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date();
-        return dateB - dateA;
-      });
-
+      const all = [...missions, ...routines].sort((a: any, b: any) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0));
       setPatientTasks(all);
     } catch (e) { console.error(e); }
   };
 
   const handleDeleteTask = async (taskId: string, isRoutine: boolean) => {
-    if (!window.confirm("¿Eliminar tarea?")) return;
+    if(!window.confirm("¿Eliminar tarea?")) return;
     try {
       await deleteDoc(doc(db, isRoutine ? "assigned_routines" : "assigned_missions", taskId));
       loadPatientTasks(selectedPatient.id);
@@ -230,47 +317,20 @@ export default function ProfessionalDashboard({ user }: Props) {
     } catch (e) { console.error(e); }
   };
 
-  const handleApprovePatient = async (patient: any) => {
-    if (!window.confirm(`¿Aprobar acceso?`)) return;
-    try {
-      let targetKey = 'general';
-      if (patient.careTeam) {
-        const foundKey = Object.keys(patient.careTeam).find(key => patient.careTeam[key].professionalId === user.uid);
-        if (foundKey) targetKey = foundKey;
-      }
-
-      await updateDoc(doc(db, "patients", patient.id), {
-        isAuthorized: true,
-        [`careTeam.${targetKey}.active`]: true,
-        [`careTeam.${targetKey}.status`]: 'active',
-        [`careTeam.${targetKey}.joinedAt`]: new Date().toISOString()
-      });
-
-      alert("Paciente aprobado.");
-      loadData();
-    } catch (e) { console.error(e); }
-  };
-
   const filteredPatients = activePatients.filter(p => p.fullName.toLowerCase().includes(searchTerm.toLowerCase()));
 
   // =================================================================
-  // >>> RENDERIZADO PRINCIPAL (NUEVA ESTRUCTURA CON SIDEBAR) <<<
+  // RENDERIZADO
   // =================================================================
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'sans-serif', background: '#F4F6F8' }}>
 
-      {/* BARRA LATERAL IZQUIERDA */}
-      <DashboardMenu
-        activeView={view}
-        onNavigate={setView}
-        onLogout={() => auth.signOut()}
-      />
+      <DashboardMenu activeView={view} onNavigate={setView} onLogout={() => auth.signOut()} />
 
-      {/* ÁREA DE CONTENIDO PRINCIPAL (Derecha) */}
       <div style={{ flex: 1, padding: '30px', maxWidth: '1200px', margin: '0 auto', overflowY: 'auto' }}>
 
-        {/* HEADER SUPERIOR */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom: '1px solid #E0E0E0', paddingBottom: '20px' }}>
+        {/* HEADER */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom:'1px solid #E0E0E0', paddingBottom:'20px' }}>
           <div>
             <h1 style={{ margin: 0, color: '#37474F', fontSize: '24px' }}>
               {view === 'dashboard' && 'Resumen General'}
@@ -282,13 +342,13 @@ export default function ProfessionalDashboard({ user }: Props) {
             <p style={{ margin: '5px 0', color: '#78909C' }}>Dr(a). {profData?.fullName}</p>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
             {profData?.professionalCode && (
-              <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#1565C0', fontWeight: 'bold', border: '1px solid #BBDEFB', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+              <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#1565C0', fontWeight:'bold', border:'1px solid #BBDEFB', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
                 🔑 {profData.professionalCode}
               </span>
             )}
-            <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#00695C', fontWeight: 'bold', border: '1px solid #B2DFDB', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+            <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#00695C', fontWeight:'bold', border:'1px solid #B2DFDB', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
               💎 {profData?.nexusBalance || 0} Nexus
             </span>
           </div>
@@ -298,18 +358,26 @@ export default function ProfessionalDashboard({ user }: Props) {
         {view === 'agenda' ? (
           <AgendaView userRole="professional" currentUserId={user.uid} onBack={() => setView('dashboard')} />
 
-          // --- VISTA: GESTIÓN DE PACIENTES ---
         ) : view === 'patients_manage' ? (
           <div>
             {/* SOLICITUDES PENDIENTES */}
             {pendingPatients.length > 0 && (
-              <div style={{ marginBottom: '30px', background: '#FFF3E0', padding: '20px', borderRadius: '10px', border: '1px solid #FFE0B2' }}>
-                <h3 style={{ marginTop: 0, color: '#E65100' }}>🔔 Solicitudes ({pendingPatients.length})</h3>
-                <div style={{ display: 'grid', gap: '10px', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+              <div style={{marginBottom:'30px', background:'#FFF3E0', padding:'20px', borderRadius:'10px', border:'1px solid #FFE0B2'}}>
+                <h3 style={{marginTop:0, color:'#E65100'}}>🔔 Solicitudes ({pendingPatients.length})</h3>
+                <div style={{display:'grid', gap:'10px', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))'}}>
                   {pendingPatients.map(p => (
-                    <div key={p.id} style={{ background: 'white', padding: '15px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
-                      <div><strong>{p.fullName}</strong><div style={{ fontSize: '12px', color: '#666' }}>{p.email}</div></div>
-                      <button onClick={() => handleApprovePatient(p)} style={{ background: '#4CAF50', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }}>Aprobar</button>
+                    <div key={p.id} style={{background:'white', padding:'15px', borderRadius:'8px', display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 2px 4px rgba(0,0,0,0.05)'}}>
+                      <div>
+                        <strong>{p.fullName}</strong>
+                        <div style={{fontSize:'12px', color:'#666'}}>{p.email}</div>
+                      </div>
+                      {/* BOTÓN CAMBIADO A "REVISAR" PARA ACTIVAR MERGE */}
+                      <button 
+                        onClick={() => handleOpenApproveModal(p)} 
+                        style={{background:'#FF9800', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', cursor:'pointer', fontWeight:'bold'}}
+                      >
+                        Revisar
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -317,285 +385,196 @@ export default function ProfessionalDashboard({ user }: Props) {
             )}
 
             {/* LISTA ACTIVOS */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 style={{ color: '#455A64', margin: 0 }}>Pacientes Activos ({activePatients.length})</h3>
-              <input type="text" placeholder="🔍 Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '10px', borderRadius: '6px', border: '1px solid #CFD8DC', width: '250px' }} />
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
+              <h3 style={{color:'#455A64', margin:0}}>Pacientes Activos ({activePatients.length})</h3>
+              <input type="text" placeholder="🔍 Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{padding:'10px', borderRadius:'6px', border:'1px solid #CFD8DC', width:'250px'}} />
             </div>
 
-            <div style={{ background: 'white', borderRadius: '10px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ background: '#ECEFF1', color: '#455A64' }}>
+            <div style={{background:'white', borderRadius:'10px', boxShadow:'0 2px 10px rgba(0,0,0,0.03)', overflow:'hidden'}}>
+              <table style={{width:'100%', borderCollapse:'collapse'}}>
+                <thead style={{background:'#ECEFF1', color:'#455A64'}}>
                   <tr>
-                    <th style={{ padding: '15px', textAlign: 'left', fontSize: '13px', textTransform: 'uppercase' }}>Nombre</th>
-                    <th style={{ padding: '15px', textAlign: 'left', fontSize: '13px', textTransform: 'uppercase' }}>Contacto</th>
-                    <th style={{ padding: '15px', textAlign: 'center', fontSize: '13px', textTransform: 'uppercase' }}>Acciones</th>
+                    <th style={{padding:'15px', textAlign:'left', fontSize:'13px', textTransform:'uppercase'}}>Nombre</th>
+                    <th style={{padding:'15px', textAlign:'left', fontSize:'13px', textTransform:'uppercase'}}>Contacto</th>
+                    <th style={{padding:'15px', textAlign:'center', fontSize:'13px', textTransform:'uppercase'}}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredPatients.map(p => (
-                    <tr key={p.id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={{ padding: '15px', fontWeight: 'bold', color: '#37474F' }}>{p.fullName}</td>
-                      <td style={{ padding: '15px', color: '#546E7A' }}>{p.email}</td>
-                      <td style={{ padding: '15px', textAlign: 'center' }}>
-                        <button onClick={() => handleOpenPatient(p)} style={{ padding: '6px 15px', background: '#E3F2FD', color: '#1565C0', border: 'none', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>
-                          📂 Ver Expediente
+                    <tr key={p.id} style={{borderBottom:'1px solid #eee'}}>
+                      <td style={{padding:'15px', fontWeight:'bold', color:'#37474F'}}>
+                        {p.fullName} {p.isManual && <span style={{fontSize:'10px', background:'#eee', padding:'2px 4px', borderRadius:'4px', color:'#666'}}>MANUAL</span>}
+                      </td>
+                      <td style={{padding:'15px', color:'#546E7A'}}>{p.email}</td>
+                      <td style={{padding:'15px', textAlign:'center'}}>
+                        <button onClick={() => handleOpenPatient(p)} style={{padding:'6px 15px', background:'#E3F2FD', color:'#1565C0', border:'none', borderRadius:'20px', cursor:'pointer', fontWeight:'bold', fontSize:'12px'}}>
+                          📂 Expediente
                         </button>
                       </td>
                     </tr>
                   ))}
-                  {filteredPatients.length === 0 && (
-                    <tr><td colSpan={3} style={{ padding: '20px', textAlign: 'center', color: '#999' }}>No se encontraron pacientes.</td></tr>
-                  )}
+                  {filteredPatients.length === 0 && <tr><td colSpan={3} style={{padding:'20px', textAlign:'center', color:'#999'}}>No se encontraron pacientes.</td></tr>}
                 </tbody>
               </table>
             </div>
           </div>
 
-          // --- VISTA: DASHBOARD INICIAL ---
         ) : view === 'dashboard' ? (
-          <div style={{ textAlign: 'center', padding: '40px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px' }}>
-              <div style={{ padding: '30px', background: 'white', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', borderBottom: '4px solid #2196F3' }}>
-                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#2196F3', marginBottom: '5px' }}>{activePatients.length}</div>
-                <div style={{ color: '#546E7A', fontWeight: 'bold' }}>Pacientes Activos</div>
+          <div style={{textAlign:'center', padding:'40px'}}>
+             {/* ... contenido del dashboard dashboard ... */}
+             <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'20px'}}>
+              <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #2196F3'}}>
+                <div style={{fontSize:'36px', fontWeight:'bold', color:'#2196F3', marginBottom:'5px'}}>{activePatients.length}</div>
+                <div style={{color:'#546E7A', fontWeight:'bold'}}>Pacientes Activos</div>
               </div>
-              <div style={{ padding: '30px', background: 'white', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', borderBottom: '4px solid #00BCD4' }}>
-                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#00838F', marginBottom: '5px' }}>{profData?.nexusBalance || 0}</div>
-                <div style={{ color: '#546E7A', fontWeight: 'bold' }}>Nexus Disponibles</div>
+              <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #00BCD4'}}>
+                <div style={{fontSize:'36px', fontWeight:'bold', color:'#00838F', marginBottom:'5px'}}>{profData?.nexusBalance || 0}</div>
+                <div style={{color:'#546E7A', fontWeight:'bold'}}>Nexus Disponibles</div>
               </div>
-            </div>
-            <div style={{ marginTop: '50px', color: '#90A4AE' }}>
-              <p>Selecciona una opción del menú lateral para comenzar.</p>
             </div>
           </div>
 
-          // --- VISTA: EQUIPO ---
         ) : view === 'team' ? (
           <div>
             <h2>Equipo de Trabajo</h2>
-            {assistants.length === 0 ? <p style={{ color: '#666' }}>No hay asistentes registrados.</p> : assistants.map(a => <div key={a.uid} style={{ padding: '10px', borderBottom: '1px solid #eee' }}>{a.displayName}</div>)}
+            {assistants.length === 0 ? <p style={{color:'#666'}}>No hay asistentes.</p> : assistants.map(a => <div key={a.uid} style={{padding:'10px', borderBottom:'1px solid #eee'}}>{a.displayName}</div>)}
           </div>
 
-          // --- VISTA: DETALLE DE PACIENTE (Ahora integrada en el layout) ---
         ) : view === 'patient_detail' && selectedPatient ? (
           <div style={{ paddingBottom: '50px' }}>
-
-            {/* SUB-NAV VOLVER */}
-            <button onClick={() => setView('patients_manage')} style={{ marginBottom: '20px', background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              ⬅ Volver a la lista
-            </button>
-
-            {/* HEADER PACIENTE */}
-            <div style={{ background: 'white', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <button onClick={() => setView('patients_manage')} style={{marginBottom:'20px', background:'none', border:'none', color:'#666', cursor:'pointer', fontSize:'14px', display:'flex', alignItems:'center', gap:'5px'}}>⬅ Volver</button>
+            <div style={{background:'white', padding:'25px', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', marginBottom:'20px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
               <div>
-                <h1 style={{ margin: '0 0 5px 0', color: '#1565C0', fontSize: '22px' }}>{selectedPatient.fullName}</h1>
-                <div style={{ color: '#666', fontSize: '14px' }}>
-                  {selectedPatient.email} • {selectedPatient.contactNumber}
-                </div>
-                {/* STATS PACIENTE */}
-                <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
-                  <span style={{ background: '#E1BEE7', color: '#4A148C', padding: '4px 10px', borderRadius: '15px', fontWeight: 'bold', fontSize: '12px' }}>
-                    Nivel {selectedPatient.gamificationProfile?.level || 1}
-                  </span>
-                  <span style={{ background: '#B3E5FC', color: '#0277BD', padding: '4px 10px', borderRadius: '15px', fontWeight: 'bold', fontSize: '12px' }}>
-                    💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0} Nexus
-                  </span>
+                <h1 style={{margin:'0 0 5px 0', color:'#1565C0', fontSize:'22px'}}>{selectedPatient.fullName}</h1>
+                <div style={{color:'#666', fontSize:'14px'}}>{selectedPatient.email} • {selectedPatient.contactNumber}</div>
+                <div style={{marginTop:'10px', display:'flex', gap:'10px'}}>
+                  <span style={{background:'#E1BEE7', color:'#4A148C', padding:'4px 10px', borderRadius:'15px', fontWeight:'bold', fontSize:'12px'}}>Nivel {selectedPatient.gamificationProfile?.level || 1}</span>
+                  <span style={{background:'#B3E5FC', color:'#0277BD', padding:'4px 10px', borderRadius:'15px', fontWeight:'bold', fontSize:'12px'}}>💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0} Nexus</span>
                 </div>
               </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end' }}>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button onClick={() => setIsHistoryOpen(true)} style={{ padding: '10px 15px', background: '#607D8B', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
-                    📜 Historial
-                  </button>
-                  {/* Botón Asignar con Lógica de Candado */}
-                  <button
-                    onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance}
-                    style={{
-                      padding: '10px 20px',
-                      background: hasValidAttendance(selectedPatient) ? '#2196F3' : '#E0E0E0',
-                      color: hasValidAttendance(selectedPatient) ? 'white' : '#757575',
-                      border: hasValidAttendance(selectedPatient) ? 'none' : '1px solid #ccc',
-                      borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold',
-                      display: 'flex', alignItems: 'center', gap: '8px'
-                    }}
-                  >
-                    {hasValidAttendance(selectedPatient) ? (
-                      <>+ Asignar Tarea</>
-                    ) : (
-                      <>🔒 Registrar Asistencia (-1 Nexus)</>
-                    )}
+              <div style={{display:'flex', flexDirection:'column', gap:'10px', alignItems:'flex-end'}}>
+                <div style={{display:'flex', gap:'10px'}}>
+                  <button onClick={() => setIsHistoryOpen(true)} style={{padding:'10px 15px', background:'#607D8B', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>📜 Historial</button>
+                  <button onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance} style={{padding:'10px 20px', background: hasValidAttendance(selectedPatient) ? '#2196F3' : '#E0E0E0', color: hasValidAttendance(selectedPatient) ? 'white' : '#757575', border: hasValidAttendance(selectedPatient) ? 'none' : '1px solid #ccc', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', display:'flex', alignItems:'center', gap:'8px'}}>
+                    {hasValidAttendance(selectedPatient) ? <>+ Asignar Tarea</> : <>🔒 Registrar Asistencia</>}
                   </button>
                 </div>
-                {!hasValidAttendance(selectedPatient) && (
-                  <small style={{ color: '#D32F2F', fontSize: '11px' }}>
-                    * Requiere asistencia reciente (72h) para asignar.
-                  </small>
-                )}
               </div>
             </div>
 
-            {/* NOTAS CLÍNICAS */}
-            <div style={{ background: '#FFFDE7', padding: '20px', borderRadius: '8px', border: '1px solid #FFF59D', marginBottom: '25px' }}>
-              <h3 style={{ marginTop: 0, color: '#F57F17', fontSize: '16px' }}>🔓 Notas Clínicas (Privadas)</h3>
-              <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                <input
-                  value={newIndicator}
-                  onChange={(e) => setNewIndicator(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddIndicator()}
-                  placeholder="Nota rápida..."
-                  style={{ flex: 1, padding: '10px', borderRadius: '4px', border: '1px solid #FBC02D' }}
-                />
-                <button onClick={handleAddIndicator} style={{ background: '#FBC02D', color: '#333', border: 'none', padding: '0 20px', borderRadius: '4px', cursor: 'pointer' }}>Agregar</button>
+            {/* NOTAS */}
+            <div style={{background:'#FFFDE7', padding:'20px', borderRadius:'8px', border:'1px solid #FFF59D', marginBottom:'25px'}}>
+              <h3 style={{marginTop:0, color:'#F57F17', fontSize:'16px'}}>🔓 Notas Clínicas</h3>
+              <div style={{display:'flex', gap:'10px', marginBottom:'15px'}}>
+                <input value={newIndicator} onChange={(e) => setNewIndicator(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddIndicator()} placeholder="Nota rápida..." style={{flex:1, padding:'10px', borderRadius:'4px', border:'1px solid #FBC02D'}} />
+                <button onClick={handleAddIndicator} style={{background:'#FBC02D', color:'#333', border:'none', padding:'0 20px', borderRadius:'4px', cursor:'pointer'}}>Agregar</button>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{display:'flex', flexWrap:'wrap', gap:'8px'}}>
                 {(selectedPatient.clinicalIndicators?.[user.uid] || []).map((item: string, idx: number) => (
-                  <div key={idx} style={{ background: 'white', border: '1px solid #FFF176', padding: '5px 12px', borderRadius: '20px', fontSize: '14px', color: '#555', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    • {item} <button onClick={() => handleDeleteIndicator(item)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#D32F2F', fontWeight: 'bold' }}> ✕ </button>
+                  <div key={idx} style={{background:'white', border:'1px solid #FFF176', padding:'5px 12px', borderRadius:'20px', fontSize:'14px', color:'#555', display:'flex', alignItems:'center', gap:'8px'}}>
+                    • {item} <button onClick={() => handleDeleteIndicator(item)} style={{border:'none', background:'none', cursor:'pointer', color:'#D32F2F', fontWeight:'bold'}}>✕</button>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* LISTA TAREAS */}
-            <h3 style={{ color: '#455A64' }}>Misiones y Rutinas Activas</h3>
-            {patientTasks.filter(t => t.status !== 'completed').length === 0 ? (
-              <p style={{ color: '#999', fontStyle: 'italic' }}>No hay tareas activas.</p>
-            ) : (
-              <div style={{ display: 'grid', gap: '10px' }}>
-                {patientTasks.filter(t => t.status !== 'completed').map(t => {
-                  const isRoutine = t.type === 'routine';
-
-                  // --- 1. LÓGICA DE CÁLCULO DE AVANCE VISUAL (Últimos 7 días) ---
-                  let statusBadge = null;
-                  let lastActivityText = null;
-
-                  if (isRoutine) {
-                    // Generar los últimos 7 días (Hoy hacia atrás)
-                    const daysToCheck = [];
-                    for (let i = 6; i >= 0; i--) {
-                      const d = new Date();
-                      d.setDate(d.getDate() - i);
-                      daysToCheck.push(d);
-                    }
-
-                    statusBadge = (
-                      <div style={{ display: 'flex', gap: '5px', marginTop: '8px' }}>
-                        {daysToCheck.map((dateObj, idx) => {
-                          const year = dateObj.getFullYear();
-                          const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-                          const day = String(dateObj.getDate()).padStart(2, '0');
-                          const dateKey = `${year}-${month}-${day}`;
-                          
-                          // Verificar si existe la fecha en el historial
-                          const isDone = t.completionHistory && t.completionHistory[dateKey];
-                          
-                          // Letra del día (L, M, M, J, V, S, D)
-                          const dayLetter = dateObj.toLocaleDateString('es-ES', { weekday: 'narrow' }).toUpperCase();
-
-                          return (
-                            <div key={idx} style={{ textAlign: 'center' }}>
-                              <div style={{
-                                width: '22px', height: '22px',
-                                borderRadius: '50%',
-                                background: isDone ? '#4CAF50' : '#ECEFF1',
-                                color: isDone ? 'white' : '#B0BEC5',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: '12px', fontWeight: 'bold',
-                                border: isDone ? '1px solid #388E3C' : '1px solid #CFD8DC',
-                                cursor: 'help'
-                              }} title={dateKey}>
-                                {isDone ? '✓' : ''}
-                              </div>
-                              <div style={{ fontSize: '9px', color: '#90A4AE', marginTop: '2px', fontWeight: 'bold' }}>
-                                {dayLetter}
-                              </div>
-                            </div>
-                          );
-                        })}
+            {/* TAREAS */}
+            <h3 style={{color:'#455A64'}}>Misiones y Rutinas</h3>
+            {patientTasks.filter(t => t.status !== 'completed').length === 0 ? <p style={{color:'#999'}}>No hay tareas activas.</p> : (
+              <div style={{display:'grid', gap:'10px'}}>
+                {patientTasks.filter(t => t.status !== 'completed').map(t => (
+                  <div key={t.id} style={{background:'white', padding:'15px', borderRadius:'8px', borderLeft:`5px solid ${t.themeColor || '#ccc'}`, display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 2px 5px rgba(0,0,0,0.05)'}}>
+                    <div>
+                      <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
+                        <span style={{fontSize:'10px', padding:'2px 6px', borderRadius:'4px', color:'white', background: t.type === 'routine' ? '#9C27B0' : '#E65100'}}>{t.type === 'routine' ? 'RUTINA' : 'MISIÓN'}</span>
+                        <strong style={{color:'#333'}}>{t.title}</strong>
                       </div>
-                    );
-
-                  } else {
-                    // Badge para Misiones (Sin cambios)
-                    const isCompleted = t.status === 'completed';
-                    statusBadge = (
-                      <div style={{
-                        display: 'inline-block',
-                        background: isCompleted ? '#E8F5E9' : '#FFF3E0',
-                        color: isCompleted ? '#2E7D32' : '#EF6C00',
-                        padding: '4px 8px',
-                        borderRadius: '12px',
-                        fontSize: '11px',
-                        fontWeight: 'bold',
-                        marginTop: '8px',
-                        border: isCompleted ? '1px solid #A5D6A7' : '1px solid #FFE0B2'
-                      }}>
-                        {isCompleted ? '🏆 COMPLETADA' : '⏳ PENDIENTE'}
-                      </div>
-                    );
-                  }
-
-                  // Opcional: Última actualización si existe el campo
-                  if (t.lastUpdated) {
-                    const dateObj = t.lastUpdated.toDate ? t.lastUpdated.toDate() : new Date(t.lastUpdated);
-                    lastActivityText = <span style={{ fontSize: '10px', color: '#90A4AE', marginLeft: '8px' }}>Actualizado: {dateObj.toLocaleDateString()}</span>;
-                  }
-
-                  return (
-                    <div key={t.id} style={{
-                      background: 'white',
-                      padding: '15px',
-                      borderRadius: '8px',
-                      borderLeft: `5px solid ${t.themeColor || '#ccc'}`,
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
-                      marginBottom: '10px'
-                    }}>
-                      <div>
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', color: 'white', background: isRoutine ? '#9C27B0' : '#E65100' }}>
-                            {isRoutine ? 'RUTINA' : 'MISIÓN'}
-                          </span>
-                          <strong style={{ color: '#333' }}>{t.title}</strong>
-                        </div>
-
-                        <div style={{ fontSize: '13px', color: '#666', marginTop: '4px' }}>{t.description}</div>
-
-                        {/* --- 2. RENDERIZADO UI DEL AVANCE --- */}
-                        <div style={{ marginTop: '5px', display: 'flex', alignItems: 'center' }}>
-                          {statusBadge}
-                          {lastActivityText}
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <button onClick={() => handleOpenEditTask(t)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px' }} title="Editar">✏️</button>
-                        <button onClick={() => handleDeleteTask(t.id, isRoutine)} style={{ color: '#D32F2F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }} title="Eliminar">🗑️</button>
-                      </div>
+                      <div style={{fontSize:'13px', color:'#666'}}>{t.description}</div>
                     </div>
-                  );
-                })}
+                    <div style={{display:'flex', gap:'10px'}}>
+                      <button onClick={() => handleOpenEditTask(t)} style={{border:'none', background:'none', cursor:'pointer', fontSize:'18px'}}>✏️</button>
+                      <button onClick={() => handleDeleteTask(t.id, t.type === 'routine')} style={{color:'#D32F2F', background:'none', border:'none', cursor:'pointer', fontSize:'18px'}}>🗑️</button>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-
-            {/* MODALES DEL DETALLE */}
-            <AssignmentModal
-              isOpen={isAssignmentModalOpen}
-              onClose={() => { setIsAssignmentModalOpen(false); setTaskToEdit(null); loadPatientTasks(selectedPatient.id); }}
-              patientId={selectedPatient.id}
-              professionalId={user.uid}
-              patientName={selectedPatient.fullName}
-              userProfessionId={profData?.professionType || 'psychologist'}
-              taskToEdit={taskToEdit}
-            />
+            <AssignmentModal isOpen={isAssignmentModalOpen} onClose={() => { setIsAssignmentModalOpen(false); setTaskToEdit(null); loadPatientTasks(selectedPatient.id); }} patientId={selectedPatient.id} professionalId={user.uid} patientName={selectedPatient.fullName} userProfessionId={profData?.professionType || 'psychologist'} taskToEdit={taskToEdit} />
             <HistoryModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} patientId={selectedPatient.id} patientName={selectedPatient.fullName} />
           </div>
         ) : null}
 
       </div>
+
+      {/* --- MODAL DE FUSIÓN DE PACIENTES (RECUPERADO) --- */}
+      {isMergeModalOpen && patientToApprove && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
+          <div style={{ background: 'white', padding: '30px', borderRadius: '12px', width: '500px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h2 style={{ marginTop: 0, color: '#1565C0' }}>🔗 Fusión de Expedientes</h2>
+            <p style={{ color: '#555', lineHeight: '1.5' }}>
+              El usuario <strong>{patientToApprove.fullName}</strong> ({patientToApprove.email}) ha solicitado acceso a través de la App.
+              <br /><br />
+              ¿Este usuario corresponde a algún paciente que ya tenías registrado manualmente?
+            </p>
+
+            {manualCandidates.length > 0 ? (
+              <div style={{ marginBottom: '20px', background: '#F5F5F5', padding: '15px', borderRadius: '8px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: 'bold', color: '#666' }}>Selecciona el expediente manual a fusionar:</label>
+                <select
+                  value={manualIdToMerge}
+                  onChange={(e) => setManualIdToMerge(e.target.value)}
+                  style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                  <option value="">-- No, es un paciente nuevo --</option>
+                  {manualCandidates.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.fullName} (Manual)
+                    </option>
+                  ))}
+                </select>
+                {manualIdToMerge && (
+                   <p style={{fontSize:'12px', color:'#E65100', marginTop:'10px'}}>
+                     ⚠️ Al fusionar, se moverán las notas, misiones y rutinas del paciente manual al nuevo usuario, y <b>se eliminará el registro manual duplicado.</b>
+                   </p>
+                )}
+              </div>
+            ) : (
+              <div style={{ padding: '15px', background: '#E3F2FD', borderRadius: '8px', marginBottom: '20px', color: '#0277BD', fontSize: '13px' }}>
+                ℹ️ No se encontraron pacientes manuales activos para sugerir, pero puedes aprobarlo como nuevo.
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                onClick={() => setIsMergeModalOpen(false)}
+                disabled={processingMerge}
+                style={{ padding: '10px 20px', background: '#ECEFF1', border: 'none', borderRadius: '4px', color: '#546E7A', cursor: 'pointer' }}
+              >
+                Cancelar
+              </button>
+
+              {manualIdToMerge ? (
+                <button
+                  onClick={() => handleExecuteMerge(true)}
+                  disabled={processingMerge}
+                  style={{ padding: '10px 20px', background: '#FF9800', border: 'none', borderRadius: '4px', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  {processingMerge ? 'Procesando...' : '🔄 Fusionar y Aprobar'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleExecuteMerge(false)}
+                  disabled={processingMerge}
+                  style={{ padding: '10px 20px', background: '#4CAF50', border: 'none', borderRadius: '4px', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  {processingMerge ? 'Procesando...' : '✅ Aprobar como Nuevo'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

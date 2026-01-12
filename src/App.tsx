@@ -1,8 +1,6 @@
-// src/App.tsx
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-// CORRECCIÓN: Quitamos 'getDoc' de aquí porque ya no lo usamos
-import { doc, setDoc, onSnapshot } from 'firebase/firestore'; 
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from './services/firebase';
 
 // Importamos todos los componentes
@@ -16,69 +14,45 @@ import AdminPanel from './components/AdminPanel';
 
 // NUEVOS COMPONENTES
 import AssistantRegister from './components/AssistantRegister';
-import AgendaView from './components/AgendaView';
+// CAMBIO REALIZADO AQUÍ: Apunta a la nueva carpeta modular
+import AgendaView from './components/agenda';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
-  
-  // userData: Datos de la colección 'users' (rol, email, etc.)
   const [userData, setUserData] = useState<any>(null);
-  
-  // patientProfile: Datos específicos de la colección 'patients'
-  const [patientProfile, setPatientProfile] = useState<any>(null);
-  
   const [loading, setLoading] = useState(true);
-
   // Modos de vista
   const [adminViewMode, setAdminViewMode] = useState<'admin' | 'professional'>('admin');
   const [assistantMode, setAssistantMode] = useState<'agenda' | 'register'>('agenda');
 
   useEffect(() => {
-    // Escucha cambios en la autenticación (Login/Logout)
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      
       if (currentUser) {
-        // 1. ESCUCHAR EN TIEMPO REAL LA COLECCIÓN 'USERS'
-        // Usamos onSnapshot para detectar cambios de ROL al instante
-        const unsubscribeUser = onSnapshot(doc(db, "users", currentUser.uid), (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            setUserData(data);
-
-            // 2. SI ES PACIENTE, ESCUCHAR TAMBIÉN LA COLECCIÓN 'PATIENTS'
-            // Esto es crítico: App.tsx debe saber si ya existe el perfil médico
-            if (data.role === 'patient') {
-              onSnapshot(doc(db, "patients", currentUser.uid), (patientSnap) => {
-                if (patientSnap.exists()) {
-                  setPatientProfile(patientSnap.data());
-                } else {
-                  setPatientProfile(null);
-                }
-              });
-            }
-          } else {
-            setUserData(null);
-          }
-          setLoading(false); // Datos cargados
-        }, (error) => {
-          console.error("Error escuchando usuario:", error);
-          setLoading(false);
-        });
-
-        // Cleanup del listener
-        return () => unsubscribeUser();
-
+        await fetchUserRole(currentUser.uid);
       } else {
-        // Usuario deslogueado
         setUserData(null);
-        setPatientProfile(null);
         setLoading(false);
       }
     });
-
-    return () => unsubscribeAuth();
+    return () => unsubscribe();
   }, []);
+
+  const fetchUserRole = async (uid: string) => {
+    try {
+      const docRef = doc(db, "users", uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setUserData(docSnap.data());
+      } else {
+        setUserData(null);
+      }
+    } catch (error) {
+      console.error("Error cargando usuario:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleRoleSelect = async (selectedRole: 'patient' | 'professional' | 'assistant') => {
     if (!user) return;
@@ -90,7 +64,7 @@ export default function App() {
         role: selectedRole,
         createdAt: new Date()
       }, { merge: true });
-      // No necesitamos reload() porque onSnapshot detectará el cambio y actualizará la UI
+      window.location.reload();
     } catch (error) {
       console.error("Error guardando el rol:", error);
       alert("Hubo un error al guardar tu selección.");
@@ -137,11 +111,9 @@ export default function App() {
     return <ProfessionalDashboard user={user} />;
   }
 
-  // --- ROL PACIENTE (CORREGIDO) ---
+  // --- ROL PACIENTE ---
   if (userData.role === 'patient') {
-    // AHORA VERIFICAMOS SI EXISTE EL PERFIL EN LA COLECCIÓN 'PATIENTS'
-    // patientProfile se llena automáticamente gracias al onSnapshot de arriba
-    if (patientProfile) {
+    if (userData.fullName || userData.profileCompleted) {
       return <PatientDashboard user={user} />;
     } else {
       return <PatientRegister />;
@@ -170,7 +142,7 @@ export default function App() {
           <AgendaView
             userRole="assistant"
             currentUserId={user.uid}
-            onBack={() => auth.signOut()}
+            onBack={() => auth.signOut()} // Salir cierra sesión
           />
         ) : (
           <AssistantRegister />
@@ -179,7 +151,7 @@ export default function App() {
     );
   }
 
-  // --- ROL DESCONOCIDO ---
+  // REEMPLAZA EL FINAL "return <div>Rol desconocido.</div>;" POR ESTO:
   return (
     <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>
       <h1 style={{color: '#D32F2F'}}>⚠️ Rol Desconocido</h1>
@@ -189,7 +161,7 @@ export default function App() {
       <button
         onClick={async () => {
           await setDoc(doc(db, "users", user.uid), { role: null }, { merge: true });
-          // No necesitamos reload, el onSnapshot detectará el cambio
+          window.location.reload();
         }}
         style={{
           marginTop: '20px', padding: '15px 30px', background: '#2196F3',
