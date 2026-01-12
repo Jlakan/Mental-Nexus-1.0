@@ -1,15 +1,14 @@
 // src/utils/GamificationUtils.ts
 
 // 1. Definición de los Niveles de Misión (Tiers)
-[cite_start]// Esto centraliza cuánto XP y Oro da cada tipo de tarea. [cite: 3]
 export const MISSION_TIERS = {
   EASY: {
     id: 'easy',
     label: 'Rutina (Fácil)',
     xp: 50,
     gold: 10,
-    nexus: 0, // Moneda premium
-    color: '#81C784', // Verde claro
+    nexus: 0,
+    color: '#81C784',
   },
   MEDIUM: {
     id: 'medium',
@@ -17,15 +16,15 @@ export const MISSION_TIERS = {
     xp: 150,
     gold: 35,
     nexus: 0,
-    color: '#2196F3', // Azul
+    color: '#2196F3',
   },
   HARD: {
     id: 'hard',
     label: 'Reto Mayor (Difícil)',
     xp: 400,
     gold: 100,
-    nexus: 1, // Da 1 Nexus
-    color: '#FF9800', // Naranja
+    nexus: 1,
+    color: '#FF9800',
   },
   LEGENDARY: {
     id: 'legendary',
@@ -33,11 +32,11 @@ export const MISSION_TIERS = {
     xp: 1500,
     gold: 500,
     nexus: 5,
-    color: '#E91E63', // Rosa/Rojo
+    color: '#E91E63',
   },
 };
 
-[cite_start]// 2. Definición de Stats Base (Atributos del Personaje) [cite: 38]
+// 2. Definición de Stats Base
 export const BASE_STATS = {
   STR: { code: 'str', label: 'Fuerza (Voluntad)', value: 10 },
   INT: { code: 'int', label: 'Intelecto (Cognición)', value: 10 },
@@ -45,12 +44,12 @@ export const BASE_STATS = {
   CHA: { code: 'cha', label: 'Carisma (Social)', value: 10 },
 };
 
-[cite_start]// 3. Constantes Iniciales para nuevos jugadores [cite: 47]
+// 3. Constantes Iniciales
 export const INITIAL_PLAYER_PROFILE = {
   level: 1,
   currentXp: 0,
-  gold: 0, // Billetera común
-  nexus: 0, // Billetera premium
+  gold: 0,
+  nexus: 0,
   stats: {
     str: 10,
     int: 10,
@@ -59,33 +58,68 @@ export const INITIAL_PLAYER_PROFILE = {
   },
 };
 
-[cite_start]// 4. Fórmula para calcular el Nivel basado en la XP acumulada [cite: 61]
-export const calculateLevel = (xp: number): number => {
-  if (xp === 0) return 1;
-  // Esta fórmula hace que subir de nivel sea progresivamente más difícil
-  return Math.floor(1 + Math.sqrt(xp) * 0.1);
+// 4. Constantes de UI y Lógica (RESTAURADAS)
+export const ESCAPE_REASONS = [
+  { id: 'too_hard', label: 'Muy difícil' },
+  { id: 'boring', label: 'Aburrido / Repetitivo' },
+  { id: 'tired', label: 'Cansancio / Baja energía' },
+  { id: 'anxiety', label: 'Me genera ansiedad' },
+  { id: 'external', label: 'Interrupción externa' }
+];
+
+export const VALIDATION_LABELS: Record<number, string> = {
+  1: 'Muy insatisfecho',
+  2: 'Poco satisfecho',
+  3: 'Neutral',
+  4: 'Satisfecho',
+  5: 'Muy satisfecho'
 };
 
-[cite_start]// 5. Fórmula para saber cuánta XP falta para el siguiente nivel [cite: 68]
+// 5. Fórmulas de Nivel (CORREGIDAS para PatientDashboard)
+// Devuelve un objeto completo en lugar de solo el número para evitar errores en Dashboard
+export const calculateLevel = (totalXp: number) => {
+  if (totalXp < 0) totalXp = 0;
+  
+  // Fórmula inversa: XP = ((Nivel - 1) * 10)^2
+  // Nivel = 1 + sqrt(XP)/10
+  const rawLevel = 1 + Math.sqrt(totalXp) * 0.1;
+  const level = Math.floor(rawLevel);
+
+  // Calcular XP límites para este nivel
+  // Nivel 1 empieza en 0 XP. Nivel 2 empieza en 100 XP (1+sqrt(100)*0.1 = 2).
+  const xpStartCurrent = Math.pow((level - 1) * 10, 2);
+  const xpStartNext = Math.pow((level) * 10, 2);
+
+  const requiredXp = xpStartNext - xpStartCurrent;
+  const currentLevelXp = totalXp - xpStartCurrent;
+
+  return {
+    level,
+    currentLevelXp, // XP acumulada dentro del nivel actual
+    requiredXp,     // XP necesaria para completar este nivel
+    progressPercent: requiredXp > 0 ? (currentLevelXp / requiredXp) * 100 : 0
+  };
+};
+
 export const xpForNextLevel = (currentLevel: number): number => {
-  return Math.pow(currentLevel / 0.1, 2);
+  // Retorna la XP TOTAL necesaria para alcanzar el siguiente nivel
+  return Math.pow(currentLevel * 10, 2);
 };
 
-// --- NUEVO: Configuración Dinámica de Economía (God Mode) ---
+// --- Configuración Dinámica de Economía ---
 
 export interface GameConfig {
-  baseXpOneTime: number;      // XP base para misiones únicas
-  baseXpRoutine: number;      // XP base para rutinas
-  goldPerTask: number;        // Oro base estándar
-  reflectionBonusXp: number;  // XP extra por reflexionar
-  streakBonusMultiplier: number; // Multiplicador por racha (ej: 1.1)
+  baseXpOneTime: number;
+  baseXpRoutine: number;
+  goldPerTask: number;
+  reflectionBonusXp: number;
+  streakBonusMultiplier: number;
 }
 
-// Valores de Respaldo (Default) - "Semilla" inicial
 export const DEFAULT_GAME_CONFIG: GameConfig = {
-  baseXpOneTime: 50,         // Equivalente a Tier EASY actual
-  baseXpRoutine: 30,         // Un poco menos que una misión única
-  goldPerTask: 10,           // Oro estándar actual
-  reflectionBonusXp: 15,     // Incentivo por escribir
-  streakBonusMultiplier: 1.05, // 5% extra por mantener racha
+  baseXpOneTime: 50,
+  baseXpRoutine: 30,
+  goldPerTask: 10,
+  reflectionBonusXp: 15,
+  streakBonusMultiplier: 1.05,
 };

@@ -3,17 +3,15 @@ import { useState, useEffect } from 'react';
 import { collection, getDocs, doc, deleteDoc, updateDoc, getDoc, query, where, setDoc } from "firebase/firestore";
 import { db, auth } from '../services/firebase';
 import AdminCatalogTree from './AdminCatalogTree';
-import GameEconomyPanel from './GameEconomyPanel'; // <--- NUEVO IMPORT
+import GameEconomyPanel from './GameEconomyPanel';
 
 export default function AdminPanel() {
-  [cite_start]// AÑADIDO: 'economy' al estado de pestañas [cite: 80]
   const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'catalog' | 'config' | 'economy'>('users');
   const [usersList, setUsersList] = useState<any[]>([]);
   const [pendingPros, setPendingPros] = useState<any[]>([]);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editForm, setEditForm] = useState<any>({});
   
-  // Configuración Global
   const [globalConfig, setGlobalConfig] = useState({ appDownloadLink: '' });
   const [savingConfig, setSavingConfig] = useState(false);
   const [, setLoading] = useState(false);
@@ -76,17 +74,17 @@ export default function AdminPanel() {
         email: editForm.email,
         role: editForm.role
       });
-      alert("Usuario actualizado correctamente.");
+      alert("Usuario actualizado.");
       setEditingUser(null);
       fetchAll();
     } catch (error) {
       console.error(error);
-      alert("Error al guardar cambios.");
+      alert("Error al guardar.");
     }
   };
 
   const handleDelete = async (uid: string, role: string) => {
-    if (!window.confirm("¿Estás SEGURO? Se borrará de todas las bases de datos.")) return;
+    if (!window.confirm("¿Estás SEGURO?")) return;
     try {
       await deleteDoc(doc(db, "users", uid));
       if (role === 'patient') await deleteDoc(doc(db, "patients", uid));
@@ -96,7 +94,7 @@ export default function AdminPanel() {
   };
 
   const handleAuthorize = async (profUid: string) => {
-    if(!window.confirm("¿Autorizar profesional?")) return;
+    if(!window.confirm("¿Autorizar?")) return;
     await updateDoc(doc(db, "professionals", profUid), { isAuthorized: true });
     fetchAll();
   };
@@ -106,92 +104,62 @@ export default function AdminPanel() {
     try {
       await setDoc(doc(db, "settings", "global"), globalConfig, { merge: true });
       alert("Configuración guardada.");
-    } catch (e) {
-      alert("Error al guardar configuración.");
-    } finally {
-      setSavingConfig(false);
-    }
+    } catch (e) { alert("Error al guardar."); } 
+    finally { setSavingConfig(false); }
   };
 
   const renderEditModal = () => {
     if (!editingUser) return null;
     return (
-      <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, backgroundColor:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:1000 }}>
-        <div style={{backgroundColor:'white', padding:'20px', borderRadius:'8px', width:'400px', maxHeight:'80vh', overflowY:'auto'}}>
-          <h2>Editando Usuario</h2>
-          <label style={{display:'block', marginTop:'10px', fontWeight:'bold'}}>Rol del Sistema:</label>
-          <select value={editForm.role || 'patient'} onChange={e => setEditForm({...editForm, role: e.target.value})} style={{width:'100%', padding:'8px', marginBottom:'10px', border:'2px solid #2196F3', borderRadius:'4px'}}>
+      <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:1000 }}>
+        <div style={{background:'white', padding:'20px', borderRadius:'8px', width:'400px'}}>
+          <h3>Editar Usuario</h3>
+          <select value={editForm.role || 'patient'} onChange={e => setEditForm({...editForm, role: e.target.value})} style={{width:'100%', marginBottom:'10px', padding:'8px'}}>
             <option value="patient">Paciente</option>
             <option value="professional">Profesional</option>
             <option value="admin">Administrador</option>
           </select>
-          <label style={{display:'block', marginTop:'10px'}}>Nombre Completo:</label>
-          <input value={editForm.fullName || editForm.displayName || ''} onChange={e => setEditForm({...editForm, fullName: e.target.value})} style={{width:'100%', padding:'8px'}} />
-          <label style={{display:'block', marginTop:'10px'}}>Correo:</label>
-          <input value={editForm.email || ''} onChange={e => setEditForm({...editForm, email: e.target.value})} style={{width:'100%', padding:'8px'}} />
-          {editingUser.role === 'professional' && (
-            <>
-            <label style={{display:'block', marginTop:'10px'}}>Cédula:</label>
-            <input value={editForm.licenseNumber || ''} onChange={e => setEditForm({...editForm, licenseNumber: e.target.value})} style={{width:'100%', padding:'8px'}} />
-            </>
-          )}
-          <div style={{marginTop:'20px', display:'flex', justifyContent:'flex-end', gap:'10px'}}>
-            <button onClick={() => setEditingUser(null)} style={{background:'#ccc', border:'none', padding:'10px', cursor:'pointer'}}>Cancelar</button>
-            <button onClick={handleSaveEdit} style={{background:'#2196F3', color:'white', border:'none', padding:'10px', cursor:'pointer'}}>Guardar Todo</button>
+          <input value={editForm.displayName || ''} onChange={e => setEditForm({...editForm, displayName: e.target.value})} placeholder="Nombre" style={{width:'100%', marginBottom:'10px', padding:'8px'}} />
+          <div style={{display:'flex', justifyContent:'flex-end', gap:'10px'}}>
+            <button onClick={() => setEditingUser(null)}>Cancelar</button>
+            <button onClick={handleSaveEdit} style={{background:'#2196F3', color:'white', border:'none', padding:'8px 16px'}}>Guardar</button>
           </div>
         </div>
       </div>
     );
   };
 
+  const getTabStyle = (isActive: boolean) => ({
+    padding: '10px 15px', cursor: 'pointer',
+    background: isActive ? '#333' : '#eee', color: isActive ? '#fff' : '#333',
+    border: 'none', borderRadius: '4px', fontWeight: 'bold' as const
+  });
+
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth:'1200px', margin:'0 auto' }}>
       {renderEditModal()}
       <div style={{display:'flex', justifyContent:'space-between', marginBottom:'20px'}}>
         <h1>Panel de Administración</h1>
-        <button onClick={() => auth.signOut()} style={{background:'#ff4444', color:'white', border:'none', padding:'8px'}}>Salir</button>
+        <button onClick={() => auth.signOut()} style={{background:'#f44336', color:'white', border:'none', padding:'8px 16px', borderRadius:'4px'}}>Cerrar Sesión</button>
       </div>
       
-      {/* NAVEGACIÓN ACTUALIZADA */}
-      <div style={{display:'flex', gap:'10px', borderBottom:'2px solid #ddd', paddingBottom:'10px', marginBottom:'20px', flexWrap:'wrap'}}>
-        <button onClick={() => setActiveTab('users')} style={{padding:'10px', background: activeTab==='users'?'#333':'#eee', color: activeTab==='users'?'white':'black'}}>👥 Usuarios</button>
-        <button onClick={() => setActiveTab('requests')} style={{padding:'10px', background: activeTab==='requests'?'#FF9800':'#eee', color: activeTab==='requests'?'white':'black'}}>🔔 Solicitudes ({pendingPros.length})</button>
-        <button onClick={() => setActiveTab('catalog')} style={{padding:'10px', background: activeTab==='catalog'?'#333':'#eee', color: activeTab==='catalog'?'white':'black'}}>📚 Catálogo</button>
-        
-        {/* NUEVA PESTAÑA: ECONOMÍA */}
-        <button 
-          onClick={() => setActiveTab('economy')} 
-          style={{
-            padding:'10px', 
-            background: activeTab==='economy'?'#E91E63':'#eee', 
-            color: activeTab==='economy'?'white':'black',
-            fontWeight: activeTab==='economy'?'bold':'normal'
-          }}
-        >
-          💎 Economía
-        </button>
-        
-        <button onClick={() => setActiveTab('config')} style={{padding:'10px', background: activeTab==='config'?'#333':'#eee', color: activeTab==='config'?'white':'black'}}>⚙️ Configuración</button>
+      <div style={{display:'flex', gap:'10px', borderBottom:'2px solid #ddd', paddingBottom:'15px', marginBottom:'25px', flexWrap:'wrap'}}>
+        <button onClick={() => setActiveTab('users')} style={getTabStyle(activeTab === 'users')}>👥 Usuarios</button>
+        <button onClick={() => setActiveTab('requests')} style={getTabStyle(activeTab === 'requests')}>🔔 Solicitudes</button>
+        <button onClick={() => setActiveTab('catalog')} style={getTabStyle(activeTab === 'catalog')}>📚 Catálogo</button>
+        <button onClick={() => setActiveTab('economy')} style={{...getTabStyle(activeTab === 'economy'), background: activeTab==='economy'?'#E91E63':'#eee'}}>💎 Economía</button>
+        <button onClick={() => setActiveTab('config')} style={getTabStyle(activeTab === 'config')}>⚙️ Configuración</button>
       </div>
 
       {activeTab === 'catalog' && <AdminCatalogTree />}
-      
-      {/* RENDERIZADO DE PANEL DE ECONOMÍA */}
       {activeTab === 'economy' && <GameEconomyPanel />}
 
       {activeTab === 'config' && (
         <div style={{maxWidth:'600px', background:'white', padding:'20px', borderRadius:'8px', border:'1px solid #ccc'}}>
-           <h3 style={{marginTop:0}}>Configuración Global de la App</h3>
-           <label style={{display:'block', fontWeight:'bold', marginBottom:'5px'}}>Enlace de Descarga / Invitación (Mental Nexus):</label>
-           <input
-             value={globalConfig.appDownloadLink}
-             onChange={e => setGlobalConfig({...globalConfig, appDownloadLink: e.target.value})}
-             placeholder="Ej: https://mentalnexus.app/descargar"
-             style={{width:'100%', padding:'10px', marginBottom:'20px', borderRadius:'4px', border:'1px solid #ccc'}}
-           />
-           <button onClick={handleSaveConfig} disabled={savingConfig} style={{padding:'10px 20px', background:'#4CAF50', color:'white', border:'none', cursor:'pointer', fontWeight:'bold'}}>
-             {savingConfig ? 'Guardando...' : 'Guardar Cambios'}
-           </button>
+           <h3>Configuración Global</h3>
+           <label>Enlace de Descarga:</label>
+           <input value={globalConfig.appDownloadLink} onChange={e => setGlobalConfig({...globalConfig, appDownloadLink: e.target.value})} style={{width:'100%', padding:'10px', margin:'10px 0'}} />
+           <button onClick={handleSaveConfig} disabled={savingConfig} style={{padding:'10px 20px', background:'#4CAF50', color:'white', border:'none'}}>{savingConfig ? 'Guardando...' : 'Guardar'}</button>
         </div>
       )}
 
@@ -202,7 +170,7 @@ export default function AdminPanel() {
             {pendingPros.map(p => (
               <tr key={p.uid}>
                 <td style={{padding:'10px'}}>{p.fullName}</td>
-                <td style={{padding:'10px'}}><button onClick={() => handleAuthorize(p.uid)}>   ✅ Autorizar   </button></td>
+                <td style={{padding:'10px'}}><button onClick={() => handleAuthorize(p.uid)}>✅ Autorizar</button></td>
               </tr>
             ))}
             </tbody>
@@ -211,17 +179,15 @@ export default function AdminPanel() {
 
       {activeTab === 'users' && (
         <table border={1} style={{width:'100%', borderCollapse:'collapse', background:'white'}}>
-          <thead><tr style={{background:'#f0f0f0'}}><th>Usuario</th><th>Rol Actual</th><th>Acciones</th></tr></thead>
+          <thead><tr style={{background:'#f0f0f0'}}><th>Usuario</th><th>Rol</th><th>Acciones</th></tr></thead>
           <tbody>
           {usersList.map(u => (
             <tr key={u.uid}>
-              <td style={{padding:'10px'}}><strong>{u.displayName || 'Sin Nombre'}</strong><br/><small>{u.email}</small></td>
-              <td style={{padding:'10px', textAlign:'center', fontWeight:'bold', color: u.role==='admin'?'purple': u.role==='professional'?'blue':'green'}}>
-                {u.role ? u.role.toUpperCase() : 'SIN ROL'}
-              </td>
-              <td style={{padding:'10px', textAlign:'center'}}>
-                <button onClick={() => handleEditClick(u)} style={{marginRight:'5px', cursor:'pointer'}}>✏️ Editar</button>
-                {!u.isAdmin && <button onClick={() => handleDelete(u.uid, u.role)} style={{color:'red', cursor:'pointer'}}>🗑 Borrar</button>}
+              <td style={{padding:'10px'}}>{u.displayName} <br/><small>{u.email}</small></td>
+              <td style={{padding:'10px'}}>{u.role}</td>
+              <td style={{padding:'10px'}}>
+                <button onClick={() => handleEditClick(u)} style={{marginRight:'5px'}}>✏️</button>
+                {u.role !== 'admin' && <button onClick={() => handleDelete(u.uid, u.role)} style={{color:'red'}}>🗑</button>}
               </td>
             </tr>
           ))}
