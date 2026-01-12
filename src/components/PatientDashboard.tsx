@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react';
 import { 
   doc, getDoc, collection, query, where, getDocs, 
-  updateDoc, increment, deleteField 
+  updateDoc, increment 
 } from "firebase/firestore";
 import { auth, db } from '../services/firebase';
-[cite_start]// [cite: 5] Restauramos xpForNextLevel
-import { calculateLevel, xpForNextLevel } from '../utils/GamificationUtils'; 
+import { calculateLevel } from '../utils/GamificationUtils';
 import TaskValidationModal from './TaskValidationModal';
 
-[cite_start]// [cite: 7] Helper para fechas
+// Helper para fechas
 const getCurrentWeekDates = () => {
   const current = new Date();
   const day = current.getDay(); 
@@ -24,7 +23,6 @@ const getCurrentWeekDates = () => {
   return week;
 };
 
-[cite_start]// [cite: 20] IMPORTANTE: Restauramos DAY_IDS que se usa en el mapeo de rutinas
 const DAY_IDS = ['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom'];
 const DAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
@@ -159,12 +157,13 @@ export default function PatientDashboard({ user }: Props) {
   if (loading) return <div style={{padding: '20px'}}>Cargando tu progreso...</div>;
   if (!patientData) return <div style={{padding: '20px'}}>Perfil no encontrado.</div>;
 
-  [cite_start]// [cite: 320, 326] Restauramos la lógica original de nivel que funciona con GamificationUtils actual
-  const currentXp = patientData.gamificationProfile?.currentXp || 0;
-  const level = calculateLevel(currentXp); 
-  const nextLevelXp = xpForNextLevel(level);
-  const prevLevelXp = xpForNextLevel(level - 1);
-  const progressPercent = Math.min(100, Math.max(0, ((currentXp - prevLevelXp) / (nextLevelXp - prevLevelXp)) * 100));
+  // Lógica de Nivel Corregida
+  const totalXp = patientData.gamificationProfile?.currentXp || 0;
+  // Desestructuramos el objeto retornado por calculateLevel
+  const { level, currentLevelXp, requiredXp } = calculateLevel(totalXp);
+  
+  // Calculamos el porcentaje solo con los datos del nivel actual
+  const progressPercent = Math.min(100, Math.max(0, (currentLevelXp / requiredXp) * 100));
 
   return (
     <div style={{ maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif', background: '#fcfcfc', minHeight: '100vh' }}>
@@ -236,7 +235,6 @@ export default function PatientDashboard({ user }: Props) {
               {isRoutine && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '15px' }}>
                    {currentWeekDates.map((dateObj, index) => {
-                      [cite_start]// [cite: 202] Restauramos el uso de DAY_IDS para evitar el crash
                       const dayId = DAY_IDS[index];
                       const dateKey = dateObj.toISOString().split('T')[0];
                       const dayLabel = DAY_LABELS[index];
@@ -245,14 +243,13 @@ export default function PatientDashboard({ user }: Props) {
                       const isSuccess = record?.status === 'success' || record?.status === 'completed';
                       const isEscaped = record?.status === 'escape' || record?.status === 'escaped';
                       
-                      [cite_start]// [cite: 205] Verificación crítica: ¿Está asignada la tarea para este día?
                       const isAssigned = task.frequency && task.frequency.includes(dayId);
 
                       let bgColor = '#f0f0f0'; 
                       let borderColor = '#ddd';
                       let content = dayLabel;
                       let cursor = 'default';
-                      let opacity = isAssigned ? 1 : 0.3; // Opacidad baja si no toca hoy
+                      let opacity = isAssigned ? 1 : 0.3;
 
                       if (isSuccess) {
                         bgColor = '#4CAF50'; 
@@ -267,7 +264,6 @@ export default function PatientDashboard({ user }: Props) {
                         bgColor = 'white';
                         cursor = 'pointer';
                       } else if (isAssigned) {
-                         // Días asignados pero no hoy (pendientes o pasados)
                          cursor = 'pointer';
                       }
 
