@@ -3,18 +3,19 @@ import { useState, useEffect } from 'react';
 import { collection, getDocs, doc, deleteDoc, updateDoc, getDoc, query, where, setDoc } from "firebase/firestore";
 import { db, auth } from '../services/firebase';
 import AdminCatalogTree from './AdminCatalogTree';
+import GameEconomyPanel from './GameEconomyPanel'; // <--- NUEVO IMPORT
 
 export default function AdminPanel() {
-  const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'catalog' | 'config'>('users');
+  [cite_start]// AÑADIDO: 'economy' al estado de pestañas [cite: 80]
+  const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'catalog' | 'config' | 'economy'>('users');
   const [usersList, setUsersList] = useState<any[]>([]);
   const [pendingPros, setPendingPros] = useState<any[]>([]);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editForm, setEditForm] = useState<any>({});
+  
   // Configuración Global
   const [globalConfig, setGlobalConfig] = useState({ appDownloadLink: '' });
   const [savingConfig, setSavingConfig] = useState(false);
-  
-  // CORRECCIÓN: Usamos una coma vacía para ignorar la variable 'loading' que no leíamos
   const [, setLoading] = useState(false);
 
   const fetchAll = async () => {
@@ -130,8 +131,8 @@ export default function AdminPanel() {
           <input value={editForm.email || ''} onChange={e => setEditForm({...editForm, email: e.target.value})} style={{width:'100%', padding:'8px'}} />
           {editingUser.role === 'professional' && (
             <>
-              <label style={{display:'block', marginTop:'10px'}}>Cédula:</label>
-              <input value={editForm.licenseNumber || ''} onChange={e => setEditForm({...editForm, licenseNumber: e.target.value})} style={{width:'100%', padding:'8px'}} />
+            <label style={{display:'block', marginTop:'10px'}}>Cédula:</label>
+            <input value={editForm.licenseNumber || ''} onChange={e => setEditForm({...editForm, licenseNumber: e.target.value})} style={{width:'100%', padding:'8px'}} />
             </>
           )}
           <div style={{marginTop:'20px', display:'flex', justifyContent:'flex-end', gap:'10px'}}>
@@ -150,61 +151,80 @@ export default function AdminPanel() {
         <h1>Panel de Administración</h1>
         <button onClick={() => auth.signOut()} style={{background:'#ff4444', color:'white', border:'none', padding:'8px'}}>Salir</button>
       </div>
-      <div style={{display:'flex', gap:'10px', borderBottom:'2px solid #ddd', paddingBottom:'10px', marginBottom:'20px'}}>
+      
+      {/* NAVEGACIÓN ACTUALIZADA */}
+      <div style={{display:'flex', gap:'10px', borderBottom:'2px solid #ddd', paddingBottom:'10px', marginBottom:'20px', flexWrap:'wrap'}}>
         <button onClick={() => setActiveTab('users')} style={{padding:'10px', background: activeTab==='users'?'#333':'#eee', color: activeTab==='users'?'white':'black'}}>👥 Usuarios</button>
         <button onClick={() => setActiveTab('requests')} style={{padding:'10px', background: activeTab==='requests'?'#FF9800':'#eee', color: activeTab==='requests'?'white':'black'}}>🔔 Solicitudes ({pendingPros.length})</button>
         <button onClick={() => setActiveTab('catalog')} style={{padding:'10px', background: activeTab==='catalog'?'#333':'#eee', color: activeTab==='catalog'?'white':'black'}}>📚 Catálogo</button>
+        
+        {/* NUEVA PESTAÑA: ECONOMÍA */}
+        <button 
+          onClick={() => setActiveTab('economy')} 
+          style={{
+            padding:'10px', 
+            background: activeTab==='economy'?'#E91E63':'#eee', 
+            color: activeTab==='economy'?'white':'black',
+            fontWeight: activeTab==='economy'?'bold':'normal'
+          }}
+        >
+          💎 Economía
+        </button>
+        
         <button onClick={() => setActiveTab('config')} style={{padding:'10px', background: activeTab==='config'?'#333':'#eee', color: activeTab==='config'?'white':'black'}}>⚙️ Configuración</button>
       </div>
 
       {activeTab === 'catalog' && <AdminCatalogTree />}
+      
+      {/* RENDERIZADO DE PANEL DE ECONOMÍA */}
+      {activeTab === 'economy' && <GameEconomyPanel />}
 
       {activeTab === 'config' && (
         <div style={{maxWidth:'600px', background:'white', padding:'20px', borderRadius:'8px', border:'1px solid #ccc'}}>
-          <h3 style={{marginTop:0}}>Configuración Global de la App</h3>
-          <label style={{display:'block', fontWeight:'bold', marginBottom:'5px'}}>Enlace de Descarga / Invitación (Mental Nexus):</label>
-          <input
-            value={globalConfig.appDownloadLink}
-            onChange={e => setGlobalConfig({...globalConfig, appDownloadLink: e.target.value})}
-            placeholder="Ej: https://mentalnexus.app/descargar"
-            style={{width:'100%', padding:'10px', marginBottom:'20px', borderRadius:'4px', border:'1px solid #ccc'}}
-          />
-          <button onClick={handleSaveConfig} disabled={savingConfig} style={{padding:'10px 20px', background:'#4CAF50', color:'white', border:'none', cursor:'pointer', fontWeight:'bold'}}>
-            {savingConfig ? 'Guardando...' : 'Guardar Cambios'}
-          </button>
+           <h3 style={{marginTop:0}}>Configuración Global de la App</h3>
+           <label style={{display:'block', fontWeight:'bold', marginBottom:'5px'}}>Enlace de Descarga / Invitación (Mental Nexus):</label>
+           <input
+             value={globalConfig.appDownloadLink}
+             onChange={e => setGlobalConfig({...globalConfig, appDownloadLink: e.target.value})}
+             placeholder="Ej: https://mentalnexus.app/descargar"
+             style={{width:'100%', padding:'10px', marginBottom:'20px', borderRadius:'4px', border:'1px solid #ccc'}}
+           />
+           <button onClick={handleSaveConfig} disabled={savingConfig} style={{padding:'10px 20px', background:'#4CAF50', color:'white', border:'none', cursor:'pointer', fontWeight:'bold'}}>
+             {savingConfig ? 'Guardando...' : 'Guardar Cambios'}
+           </button>
         </div>
       )}
 
       {activeTab === 'requests' && (
-        <table border={1} style={{width:'100%', borderCollapse:'collapse', background:'white'}}>
-          <thead><tr style={{background:'#fff3e0'}}><th>Nombre</th><th>Acción</th></tr></thead>
-          <tbody>
+         <table border={1} style={{width:'100%', borderCollapse:'collapse', background:'white'}}>
+           <thead><tr style={{background:'#fff3e0'}}><th>Nombre</th><th>Acción</th></tr></thead>
+            <tbody>
             {pendingPros.map(p => (
               <tr key={p.uid}>
                 <td style={{padding:'10px'}}>{p.fullName}</td>
-                <td style={{padding:'10px'}}><button onClick={() => handleAuthorize(p.uid)}>  ✅ Autorizar  </button></td>
+                <td style={{padding:'10px'}}><button onClick={() => handleAuthorize(p.uid)}>   ✅ Autorizar   </button></td>
               </tr>
             ))}
-          </tbody>
-        </table>
+            </tbody>
+         </table>
       )}
 
       {activeTab === 'users' && (
         <table border={1} style={{width:'100%', borderCollapse:'collapse', background:'white'}}>
           <thead><tr style={{background:'#f0f0f0'}}><th>Usuario</th><th>Rol Actual</th><th>Acciones</th></tr></thead>
           <tbody>
-            {usersList.map(u => (
-              <tr key={u.uid}>
-                <td style={{padding:'10px'}}><strong>{u.displayName || 'Sin Nombre'}</strong><br/><small>{u.email}</small></td>
-                <td style={{padding:'10px', textAlign:'center', fontWeight:'bold', color: u.role==='admin'?'purple': u.role==='professional'?'blue':'green'}}>
-                  {u.role ? u.role.toUpperCase() : 'SIN ROL'}
-                </td>
-                <td style={{padding:'10px', textAlign:'center'}}>
-                  <button onClick={() => handleEditClick(u)} style={{marginRight:'5px', cursor:'pointer'}}>✏️ Editar</button>
-                  {!u.isAdmin && <button onClick={() => handleDelete(u.uid, u.role)} style={{color:'red', cursor:'pointer'}}>🗑 Borrar</button>}
-                </td>
-              </tr>
-            ))}
+          {usersList.map(u => (
+            <tr key={u.uid}>
+              <td style={{padding:'10px'}}><strong>{u.displayName || 'Sin Nombre'}</strong><br/><small>{u.email}</small></td>
+              <td style={{padding:'10px', textAlign:'center', fontWeight:'bold', color: u.role==='admin'?'purple': u.role==='professional'?'blue':'green'}}>
+                {u.role ? u.role.toUpperCase() : 'SIN ROL'}
+              </td>
+              <td style={{padding:'10px', textAlign:'center'}}>
+                <button onClick={() => handleEditClick(u)} style={{marginRight:'5px', cursor:'pointer'}}>✏️ Editar</button>
+                {!u.isAdmin && <button onClick={() => handleDelete(u.uid, u.role)} style={{color:'red', cursor:'pointer'}}>🗑 Borrar</button>}
+              </td>
+            </tr>
+          ))}
           </tbody>
         </table>
       )}
