@@ -4,11 +4,10 @@ import {
   updateDoc, increment 
 } from "firebase/firestore";
 import { auth, db } from '../services/firebase';
-[cite_start]// [cite: 1] Usamos las utilidades tal como están definidas en tu archivo subido
-import { calculateLevel, xpForNextLevel } from '../utils/GamificationUtils';
+import { calculateLevel } from '../utils/GamificationUtils';
 import TaskValidationModal from './TaskValidationModal';
 
-[cite_start]// [cite: 940] Helper original para obtener fechas de la semana
+// Helper para obtener las fechas de la semana actual
 const getCurrentWeekDates = () => {
   const current = new Date();
   const day = current.getDay(); 
@@ -24,7 +23,7 @@ const getCurrentWeekDates = () => {
   return week;
 };
 
-[cite_start]// [cite: 953] Constantes originales críticas para el mapeo de días
+// Constantes para mapear días (IMPORTANTE: Deben coincidir con lo que guardas en Firebase: 'lun', 'mar', etc.)
 const DAY_IDS = ['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom'];
 const DAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
@@ -37,43 +36,31 @@ export default function PatientDashboard({ user }: Props) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Estado para el nuevo Modal
+  // Estado para el Modal de Decisión
   const [selectedTask, setSelectedTask] = useState<{ task: any, dateObj?: Date } | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   const currentUser = user || auth.currentUser;
   const currentWeekDates = getCurrentWeekDates();
 
-  [cite_start]// [cite: 966] Carga de datos restaurada como en el original para evitar errores de carga
   const loadData = async () => {
     if (!currentUser) return;
     setLoading(true);
     try {
-      // 1. Cargar Perfil
-      const docRef = doc(db, "patients", currentUser.uid);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setPatientData(docSnap.data());
-      } else {
-        console.error("No se encontró el perfil del paciente");
+      const pDoc = await getDoc(doc(db, "patients", currentUser.uid));
+      if (pDoc.exists()) {
+        setPatientData(pDoc.data());
       }
 
-      // 2. Cargar Tareas (Misiones y Rutinas)
-      // Usamos la lógica original de queries separadas
-      const qMissions = query(collection(db, "assigned_missions"), where("patientId", "==", currentUser.uid));
-      const qRoutines = query(collection(db, "assigned_routines"), where("patientId", "==", currentUser.uid));
-
-      const [snapM, snapR] = await Promise.all([getDocs(qMissions), getDocs(qRoutines)]);
-
-      // Mapeamos agregando el tipo para diferenciar en la UI
-      const missions = snapM.docs.map(d => ({ id: d.id, ...d.data(), type: 'one_time' }));
-      const routines = snapR.docs.map(d => ({ id: d.id, ...d.data(), type: 'daily' }));
-
-      // Filtramos misiones ya completadas para limpiar la vista (opcional, como en el original)
-      const activeMissions = missions.filter((m: any) => m.status !== 'completed' && m.status !== 'escaped');
+      const q1 = query(collection(db, "assigned_missions"), where("patientId", "==", currentUser.uid));
+      const q2 = query(collection(db, "assigned_routines"), where("patientId", "==", currentUser.uid));
       
-      setTasks([...activeMissions, ...routines]);
-
+      const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+      
+      const missions = snap1.docs.map(d => ({ id: d.id, ...d.data(), type: 'one_time' }));
+      const routines = snap2.docs.map(d => ({ id: d.id, ...d.data(), type: 'daily' }));
+      
+      setTasks([...missions, ...routines]);
     } catch (error) {
       console.error("Error cargando dashboard:", error);
     } finally {
@@ -86,17 +73,18 @@ export default function PatientDashboard({ user }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
-  // --- LÓGICA DEL NUEVO MODAL (Objective 1 & 2) ---
-
+  // --- LÓGICA DEL MODAL ---
   const openTaskDecision = (task: any, dateObj?: Date) => {
-    // Validar tiempo (Solo para rutinas)
+    // Validación de tiempo para Rutinas
     if (dateObj) {
-      const windowStart = new Date(dateObj); windowStart.setHours(5,0,0,0);
-      const windowEnd = new Date(dateObj); windowEnd.setDate(windowEnd.getDate()+1); windowEnd.setHours(23,59,59,999);
-      const now = new Date();
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const target = new Date(dateObj);
+      target.setHours(0,0,0,0);
       
-      if (now < windowStart || now > windowEnd) {
-        alert("⚠️ Fuera de tiempo. Solo puedes completar tareas del día actual (o hasta la noche del siguiente).");
+      // Permitimos completar hoy o días pasados (si quieres bloquear pasados, descomenta la validación)
+      if (target > today) {
+        alert("🚫 No puedes completar tareas del futuro.");
         return;
       }
     }
@@ -111,7 +99,7 @@ export default function PatientDashboard({ user }: Props) {
     const dateKey = dateObj ? dateObj.toISOString().split('T')[0] : null;
     
     setProcessingId(task.id);
-    setSelectedTask(null); // Cerrar modal
+    setSelectedTask(null); 
 
     try {
       const patientRef = doc(db, "patients", currentUser.uid);
@@ -121,27 +109,19 @@ export default function PatientDashboard({ user }: Props) {
 
       const timestamp = new Date();
       
-      // Datos a guardar
       const recordData = {
         completedAt: timestamp,
-        status: result.type, // 'success' o 'escape' (interno)
-        ...result.payload // { rating, reflection } o { motive }
+        status: result.type, // 'success' | 'escape'
+        ...result.payload 
       };
 
-      // 1. ACTUALIZAR TAREA
+      // 1. Guardar en la Tarea
       if (isRoutine && dateKey) {
-        // Guardamos OBJETO en lugar de boolean, como pide el nuevo requerimiento
         await updateDoc(taskRef, {
-          [`completionHistory.${dateKey}`]: {
-             ...recordData,
-             // Mapeamos status interno a status de UI si es necesario, 
-             // pero aquí guardamos el objeto completo para analítica.
-             status: result.type 
-          },
+          [`completionHistory.${dateKey}`]: recordData,
           lastUpdated: timestamp
         });
       } else {
-        // One-time mission
         await updateDoc(taskRef, {
           status: result.type === 'success' ? 'completed' : 'escaped',
           completionData: recordData,
@@ -149,207 +129,202 @@ export default function PatientDashboard({ user }: Props) {
         });
       }
 
-      // 2. ACTUALIZAR PERFIL (GAMIFICACIÓN)
-      // Solo sumamos si es ÉXITO
+      // 2. Dar Recompensas (Solo si fue Éxito)
       if (result.type === 'success') {
         const xpBase = task.rewards?.xp || 50;
         const xpBonus = recordData.reflection ? 10 : 0; 
         const totalXp = xpBase + xpBonus;
         const goldGain = task.rewards?.gold || 10;
         
-        // Update simple
-        await updateDoc(patientRef, {
+        const updates: any = {
           "gamificationProfile.currentXp": increment(totalXp),
           "gamificationProfile.wallet.gold": increment(goldGain)
-        });
+        };
         
-        // Si hay stat específico
         if (task.targetStat && task.rewards?.statValue) {
-           await updateDoc(patientRef, {
-             [`gamificationProfile.stats.${task.targetStat}`]: increment(task.rewards.statValue)
-           });
+           updates[`gamificationProfile.stats.${task.targetStat}`] = increment(task.rewards.statValue);
         }
+
+        await updateDoc(patientRef, updates);
       } 
 
-      await loadData(); // Recargar UI
+      await loadData(); 
 
     } catch (e) {
       console.error("Error guardando progreso:", e);
-      alert("Error de conexión.");
+      alert("Error de conexión. Intenta de nuevo.");
     } finally {
       setProcessingId(null);
     }
   };
 
+  if (loading) return <div style={{padding: '20px'}}>Cargando tu progreso...</div>;
+  if (!patientData) return <div style={{padding: '20px'}}>Perfil no encontrado.</div>;
 
-  // --- RENDERIZADO ---
-
-  if (loading) return <div style={{padding: '20px', textAlign:'center'}}>Cargando tu aventura...</div>;
-  if (!patientData) return <div style={{padding: '20px', textAlign:'center'}}>Perfil no encontrado.</div>;
-
-  [cite_start]// [cite: 1070] LÓGICA ORIGINAL DE NIVEL (Compatible con Source 1)
-  const currentXp = patientData.gamificationProfile?.currentXp || 0;
-  // calculateLevel devuelve un NÚMERO en tu archivo GamificationUtils actual
-  const level = calculateLevel(currentXp); 
-  const nextLevelXp = xpForNextLevel(level);
-  const prevLevelXp = xpForNextLevel(level - 1);
-  const progressPercent = Math.min(100, Math.max(0, ((currentXp - prevLevelXp) / (nextLevelXp - prevLevelXp)) * 100));
+  // --- CÁLCULO DE NIVEL CORREGIDO ---
+  const currentTotalXp = patientData.gamificationProfile?.currentXp || 0;
+  
+  // calculateLevel devuelve un Objeto: { level, currentLevelXp, requiredXp }
+  const levelInfo = calculateLevel(currentTotalXp); 
+  
+  // Extraemos las propiedades para usarlas individualmente
+  const currentLevel = levelInfo.level;
+  const xpInCurrentLevel = levelInfo.currentLevelXp;
+  const xpRequiredForNext = levelInfo.requiredXp;
+  
+  // Calculamos porcentaje evitando división por cero
+  const progressPercent = xpRequiredForNext > 0 
+    ? Math.min(100, (xpInCurrentLevel / xpRequiredForNext) * 100) 
+    : 100;
 
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px', fontFamily: 'sans-serif' }}>
+    <div style={{ maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif', background: '#fcfcfc', minHeight: '100vh' }}>
       
-      {/* HEADER DEL PERSONAJE (Estilo Original mejorado) */}
-      <div style={{ background: 'linear-gradient(135deg, #1565C0 0%, #42A5F5 100%)', color: 'white', padding: '25px', borderRadius: '15px', marginBottom: '25px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)' }}>
-        <div style={{display:'flex', justifyContent:'space-between'}}>
+      {/* HEADER GAMIFICACIÓN */}
+      <div style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', padding: '20px', borderRadius: '0 0 20px 20px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <div>
-            <h1 style={{margin:0, fontSize:'24px'}}>{patientData.fullName}</h1>
-            <p style={{margin:'5px 0 0 0', opacity:0.9}}>Nivel {level} • Héroe</p>
+            <h1 style={{ margin: 0, fontSize: '24px' }}>Nivel {currentLevel}</h1>
+            <span style={{ fontSize: '14px', opacity: 0.9 }}>{patientData.name || 'Héroe'}</span>
           </div>
-          <div style={{textAlign:'right'}}>
-             <div style={{fontSize:'14px', background:'rgba(0,0,0,0.2)', padding:'5px 10px', borderRadius:'20px', marginBottom:'5px'}}>
-               💰 {patientData.gamificationProfile?.wallet?.gold || 0} Oro
-             </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '20px', fontWeight: 'bold' }}>💰 {patientData.gamificationProfile?.wallet?.gold || 0}</div>
+            <div style={{ fontSize: '12px' }}>Monedas</div>
           </div>
         </div>
-        <div style={{marginTop:'20px'}}>
-           <div style={{display:'flex', justifyContent:'space-between', fontSize:'12px', marginBottom:'5px'}}>
-              <span>XP: {currentXp}</span>
-              <span>Meta: {nextLevelXp}</span>
-           </div>
-           <div style={{height:'10px', background:'rgba(0,0,0,0.2)', borderRadius:'5px', overflow:'hidden'}}>
-              <div style={{width: `${progressPercent}%`, height:'100%', background:'#FFCA28', transition:'width 0.5s ease'}}></div>
-           </div>
+        
+        {/* Barra de Progreso */}
+        <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '10px', height: '12px', overflow: 'hidden' }}>
+          <div style={{ width: `${progressPercent}%`, background: '#4CAF50', height: '100%', transition: 'width 0.5s' }} />
+        </div>
+        <div style={{ fontSize: '11px', marginTop: '5px', textAlign: 'right' }}>
+           XP para Nivel {currentLevel + 1}
         </div>
       </div>
 
-      <h2 style={{color:'#333', borderBottom:'2px solid #eee', paddingBottom:'10px'}}>📜 Misiones Activas</h2>
+      <div style={{ padding: '20px' }}>
+        <h3 style={{ borderBottom: '2px solid #eee', paddingBottom: '10px', color: '#444' }}>
+          Misiones Activas
+        </h3>
 
-      {tasks.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>
-            No tienes misiones asignadas hoy. ¡Relájate! 🍃
-          </div>
-      ) : (
-        <div style={{display:'grid', gap:'15px'}}>
         {tasks.map(task => {
           const isRoutine = task.type === 'daily';
           
           return (
-            <div key={task.id} style={{ background: 'white', borderRadius: '12px', padding: '15px', borderLeft: `5px solid ${task.themeColor || '#ccc'}`, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+            <div key={task.id} style={{ background: 'white', borderRadius: '12px', padding: '15px', marginBottom: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', border: '1px solid #eee' }}>
               
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
                 <div>
-                  <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', color: 'white', background: isRoutine ? '#9C27B0' : '#E65100', marginRight:'8px' }}>
-                    {isRoutine ? 'RUTINA' : 'MISIÓN'}
+                  <h4 style={{ margin: 0, fontSize: '16px', color: '#333' }}>{task.staticTaskData?.title || task.title}</h4>
+                  <span style={{ fontSize: '12px', color: '#888', background: '#f0f0f0', padding: '2px 6px', borderRadius: '4px' }}>
+                    {isRoutine ? 'Rutina Diaria' : 'Misión Única'}
                   </span>
-                  <h3 style={{ margin: '5px 0', fontSize: '18px', color: '#333', display:'inline-block' }}>{task.staticTaskData?.title || task.title}</h3>
                 </div>
                 <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#667eea' }}>
                   +{task.rewards?.xp || 50} XP
                 </div>
               </div>
 
-              {/* CUERPO: Misión Única */}
+              {/* CASO: MISIÓN ÚNICA */}
               {!isRoutine && (
                  <div style={{ marginTop: '10px' }}>
+                    {task.status === 'completed' ? (
+                      <div style={{ padding: '10px', background: '#E8F5E9', color: '#2E7D32', borderRadius: '6px', textAlign: 'center', fontWeight: 'bold' }}>
+                        ✓ Misión Completada
+                      </div>
+                    ) : task.status === 'escaped' ? (
+                      <div style={{ padding: '10px', background: '#FFF3E0', color: '#E65100', borderRadius: '6px', textAlign: 'center', fontWeight: 'bold' }}>
+                        🛡️ Runa Usada
+                      </div>
+                    ) : (
                       <button 
                         onClick={() => openTaskDecision(task)}
                         disabled={!!processingId}
-                        style={{ background: '#4CAF50', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
-                        Completar Misión
+                        style={{ width: '100%', padding: '12px', background: '#2196F3', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
+                        Comenzar Misión
                       </button>
+                    )}
                  </div>
               )}
 
-              [cite_start]{/* [cite: 1134] CUERPO: Rutina (Grid Semanal) - USANDO LÓGICA ORIGINAL */}
+              {/* CASO: RUTINA (GRID SEMANAL) */}
               {isRoutine && (
-                <div style={{background:'#F5F5F5', padding:'10px', borderRadius:'8px', marginTop:'5px'}}>
-                   <div style={{fontSize:'12px', fontWeight:'bold', marginBottom:'8px', color:'#555', textAlign:'center'}}>SEMANA ACTUAL</div>
-                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '15px' }}>
                    {currentWeekDates.map((dateObj, index) => {
-                      // Usamos DAY_IDS original para asegurar el match
-                      const dayId = DAY_IDS[index];
-                      const label = DAY_LABELS[index];
+                      const dayId = DAY_IDS[index]; // lun, mar, mie...
+                      const dayLabel = DAY_LABELS[index]; // L, M, X...
                       const dateKey = dateObj.toISOString().split('T')[0];
                       
-                      // Buscamos el registro (ahora puede ser objeto o boolean legacy)
                       const record = task.completionHistory?.[dateKey];
-                      
-                      // Compatibilidad: Si es 'true' (legacy) o status 'success'/'completed'
-                      const isSuccess = record === true || record?.status === 'success' || record?.status === 'completed';
+                      const isSuccess = record?.status === 'success' || record?.status === 'completed';
                       const isEscaped = record?.status === 'escape' || record?.status === 'escaped';
                       
-                      // Verificación de asignación original
+                      // ¿Está asignada para este día de la semana?
                       const isAssigned = task.frequency && task.frequency.includes(dayId);
 
-                      // Lógica de fechas
-                      const windowStart = new Date(dateObj); windowStart.setHours(5,0,0,0);
-                      const windowEnd = new Date(dateObj); windowEnd.setDate(windowEnd.getDate()+1); windowEnd.setHours(23,59,59,999);
-                      const now = new Date();
-                      const isTimeOpen = now >= windowStart && now <= windowEnd;
-
-                      // Estilos visuales
-                      let bgColor = 'white'; 
-                      let borderColor = 'transparent';
+                      let bgColor = '#f0f0f0'; 
+                      let borderColor = '#ddd';
+                      let content = dayLabel;
                       let cursor = 'default';
-                      let opacity = 0.5;
-                      let content = label;
+                      let opacity = isAssigned ? 1 : 0.3;
 
-                      if (isAssigned) {
-                        opacity = 1;
-                        borderColor = task.themeColor || '#9C27B0';
-                        if (isSuccess) {
-                            bgColor = task.themeColor || '#4CAF50';
-                            borderColor = bgColor;
-                            content = '✓';
-                        } else if (isEscaped) {
-                            bgColor = '#FF9800';
-                            borderColor = bgColor;
-                            content = '🛡️';
-                        }
+                      if (isSuccess) {
+                        bgColor = '#4CAF50'; 
+                        borderColor = '#4CAF50';
+                        content = '✓';
+                      } else if (isEscaped) {
+                        bgColor = '#FF9800'; 
+                        borderColor = '#FF9800';
+                        content = '🛡️';
+                      } else if (dateKey === new Date().toISOString().split('T')[0] && isAssigned) {
+                        // Es HOY y está pendiente
+                        borderColor = '#2196F3'; 
+                        bgColor = 'white';
+                        cursor = 'pointer';
+                      } else if (isAssigned && !isSuccess && !isEscaped) {
+                         // Días asignados pasados o futuros
+                         cursor = 'pointer';
                       }
-
-                      // Habilitar click si es hoy/abierto y está asignado
-                      // Y NO está completado/escapado (para editar, deben contactar soporte o resetear logic aparte)
-                      if (isTimeOpen && isAssigned && !isSuccess && !isEscaped) {
-                          cursor = 'pointer';
-                      }
-                      
-                      // Días pasados o no asignados se ven tenues
-                      if (!isTimeOpen && !isSuccess && !isEscaped) opacity = 0.4;
 
                       return (
-                        <div key={dayId} style={{textAlign:'center', flex:1}}>
-                          <div 
-                            onClick={() => {
-                                // Aquí llamamos al NUEVO modal en lugar del check directo
-                                if (isTimeOpen && isAssigned && !isSuccess && !isEscaped) {
-                                    openTaskDecision(task, dateObj);
-                                }
-                            }}
-                            style={{ 
-                                width:'35px', height:'35px', borderRadius:'50%', margin:'0 auto',
-                                display:'flex', alignItems:'center', justifyContent:'center',
-                                background: bgColor, border: `2px solid ${borderColor}`,
-                                color: (isSuccess || isEscaped) ? 'white' : '#555',
-                                fontWeight: 'bold', cursor: cursor, opacity: opacity, transition: 'all 0.2s'
-                            }}
-                            title={!isTimeOpen ? "Fuera de horario" : "Click para reportar"}
-                          >
+                        <div 
+                          key={dateKey} 
+                          onClick={() => {
+                            if (isAssigned && !isSuccess && !isEscaped) openTaskDecision(task, dateObj);
+                          }}
+                          style={{ 
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', 
+                            cursor: cursor, 
+                            opacity: opacity
+                          }}
+                        >
+                          <div style={{ 
+                            width: '32px', height: '32px', borderRadius: '50%', 
+                            background: bgColor, border: `2px solid ${borderColor}`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: (isSuccess || isEscaped) ? 'white' : '#555',
+                            fontWeight: 'bold', fontSize: '14px', transition: 'all 0.2s'
+                          }}>
                             {content}
                           </div>
+                          <span style={{ fontSize: '10px', color: '#999', marginTop: '4px' }}>{dayLabel}</span>
                         </div>
                       );
                    })}
-                   </div>
                 </div>
               )}
             </div>
           );
         })}
-        </div>
-      )}
+        
+        {tasks.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>
+            No tienes misiones asignadas hoy. ¡Relájate! 🍃
+          </div>
+        )}
+      </div>
 
-      {/* MODAL DE DECISIÓN (Nueva UI) */}
+      {/* MODAL GLOBAL */}
       <TaskValidationModal
         isOpen={!!selectedTask}
         taskTitle={selectedTask?.task?.staticTaskData?.title || selectedTask?.task?.title || "Misión"}
