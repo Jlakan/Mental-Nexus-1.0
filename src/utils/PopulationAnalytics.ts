@@ -1,5 +1,5 @@
+import { Assignment } from '../types';
 import { analyzeAssignment } from './ClinicalEngine';
-import type { Assignment } from './ClinicalEngine';
 
 // ============================================================================
 // 1. INTERFACES DE POBLACIÓN (Big Data)
@@ -60,6 +60,7 @@ const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const getDayKey = (date: Date): string => DAY_KEYS[date.getDay()];
 
 export const getAgeBucket = (age: number): string => {
+  if (age === undefined || age === null) return 'unknown';
   // Pediatría
   if (age <= 0.5) return '0-6m';      
   if (age <= 1)   return '6m-1y';     
@@ -84,9 +85,17 @@ export const getAgeBucket = (age: number): string => {
 // 3. MOTOR DE AGREGACIÓN
 // ============================================================================
 
+/**
+ * Calcula estadísticas poblacionales cruzando datos de usuarios y asignaciones.
+ * @param users Lista completa de usuarios (para datos demográficos).
+ * @param allAssignments Lista completa de tareas (para datos de rendimiento).
+ */
 export const calculateAggregatedStats = (
+  users: any[], 
   allAssignments: Assignment[]
 ): PopulationStatsCache => {
+  
+  // A. Inicializar Caché
   const cache: PopulationStatsCache = {
     lastUpdated: new Date(),
     totalActivePatients: 0,
@@ -104,18 +113,35 @@ export const calculateAggregatedStats = (
     segmentedWorkload: {}
   };
 
+  // B. Crear Mapa de Usuarios para búsqueda rápida (Optimización)
+  const userMap = new Map<string, any>();
   const uniquePatients = new Set<string>();
+  
+  users.forEach(u => {
+      userMap.set(u.uid, u);
+      if (u.role === 'patient') uniquePatients.add(u.uid);
+  });
+  
+  cache.totalActivePatients = uniquePatients.size;
 
+  // C. Iteración Principal (Big Data Loop)
   for (const task of allAssignments) {
     if(!task) continue;
-    uniquePatients.add(task.patientId);
 
     // USAMOS EL MOTOR HÍBRIDO DEL OTRO ARCHIVO
-    const analysis = analyzeAssignment(task);
-    const score = analysis.adjustedScore;
+    // Nota: Si analyzeAssignment falla o no existe, usamos un objeto default seguro.
+    let analysis;
+    try {
+        analysis = analyzeAssignment(task);
+    } catch (e) {
+        analysis = { adjustedScore: 0 }; // Fallback seguro
+    }
+    
+    const score = analysis.adjustedScore || 0;
 
-    // --- A. Análisis de Categorías ---
-    const catName = task.staticTaskData?.category || "General";
+    // --- 1. Análisis de Categorías ---
+    // Intentamos sacar la categoría de varios lugares posibles
+    const catName = task.category || (task as any).staticTaskData?.category || "General";
 
     if (!cache.byCategory[catName]) {
       cache.byCategory[catName] = {
@@ -129,38 +155,44 @@ export const calculateAggregatedStats = (
     const catStats = cache.byCategory[catName];
     catStats.assignedCount++;
 
-    // --- B. Análisis Temporal (Heatmaps) ---
-    if (task.completionHistory) {
-      task.completionHistory.forEach(record => {
-        const d = (record.completedAt as any).toDate ? (record.completedAt as any).toDate() : new Date(record.completedAt);
-        catStats.dayDistribution[getDayKey(d)]++;
+    // --- 2. Análisis Temporal (Heatmaps) ---
+    // Usamos completionHistory si existe, si no, intentamos con completedAt directo
+    const history = (task as any).completionHistory || (task.completedAt ? [{ completedAt: task.completedAt, selfRating: task.rating }] : []);
 
-        let timeBlock = (record as any).timeBlock;
-        if (!timeBlock) {
-            const hour = d.getHours();
-            if (hour < 12) timeBlock = 'morning';
-            else if (hour < 19) timeBlock = 'afternoon';
-            else timeBlock = 'night';
-        }
+    history.forEach((record: any) => {
+        // Manejo seguro de fechas (Firestore Timestamp vs JS Date)
+        const d = record.completedAt?.toDate ? record.completedAt.toDate() : new Date(record.completedAt);
+        
+        if (!isNaN(d.getTime())) {
+            catStats.dayDistribution[getDayKey(d)]++;
 
-        if (cache.timeOfDayStats[timeBlock as 'morning']) {
-          const stats = cache.timeOfDayStats[timeBlock as 'morning'];
-          stats.completed++;
-          const ratingScore = record.selfRating ? (record.selfRating / 5) * 100 : 100;
-          stats.totalScore += ratingScore;
+            let timeBlock = record.timeBlock;
+            if (!timeBlock) {
+                const hour = d.getHours();
+                if (hour < 12) timeBlock = 'morning';
+                else if (hour < 19) timeBlock = 'afternoon';
+                else timeBlock = 'night';
+            }
+
+            if (cache.timeOfDayStats[timeBlock as 'morning']) {
+            const stats = cache.timeOfDayStats[timeBlock as 'morning'];
+            stats.completed++;
+            const ratingScore = record.selfRating ? (record.selfRating / 5) * 100 : 100;
+            stats.totalScore += ratingScore;
+            }
         }
-      });
-    }
+    });
 
     if (score > 0) {
       catStats.completedCount++;
       catStats.totalSuccessScoreSum += score;
 
-      // --- C. Correlaciones (Arquetipos) ---
-      if (task.contextSnapshot?.archetypes) {
-        const tags = task.contextSnapshot.archetypes;
+      // --- 3. Correlaciones (Arquetipos) ---
+      // Buscamos etiquetas en el snapshot o directamente en la tarea
+      const tags = (task as any).contextSnapshot?.archetypes || (task as any).tags || [];
 
-        tags.forEach(tag => {
+      if (Array.isArray(tags)) {
+        tags.forEach((tag: string) => {
           if (!catStats.archetypeCompletionMap[tag]) catStats.archetypeCompletionMap[tag] = 0;
           catStats.archetypeCompletionMap[tag]++;
         });
@@ -175,8 +207,8 @@ export const calculateAggregatedStats = (
         }
       }
 
-      // --- D. Rendimiento por Especialidad ---
-      const specialty = task.authorSpecialty || 'general';
+      // --- 4. Rendimiento por Especialidad ---
+      const specialty = (task as any).authorSpecialty || 'general';
       if (!cache.specialtyPerformance[specialty]) {
         cache.specialtyPerformance[specialty] = { count: 0, totalScore: 0 };
       }
@@ -184,41 +216,53 @@ export const calculateAggregatedStats = (
       cache.specialtyPerformance[specialty].totalScore += score;
     }
 
-    // --- E. Curvas Globales y Segmentación ---
-    if (task.contextSnapshot) {
-      const load = Math.round(task.contextSnapshot.workloadLoad || 0);
+    // --- 5. Curvas Globales y Segmentación ---
+    const context = (task as any).contextSnapshot || {};
+    const load = Math.round(context.workloadLoad || (task as any).difficultyLevel || 0);
 
-      // Curva de Carga General 
-      if (!cache.workloadCurve[load]) cache.workloadCurve[load] = { count: 0, totalScore: 0 };
-      cache.workloadCurve[load].count++;
-      cache.workloadCurve[load].totalScore += score;
+    // Curva de Carga General 
+    if (!cache.workloadCurve[load]) cache.workloadCurve[load] = { count: 0, totalScore: 0 };
+    cache.workloadCurve[load].count++;
+    cache.workloadCurve[load].totalScore += score;
 
-      // Curva Segmentada por Edad
-      if (task.contextSnapshot.age !== undefined) {
-        const ageBucket = getAgeBucket(task.contextSnapshot.age);
+    // Curva Segmentada por Edad
+    // Intentamos obtener la edad del snapshot, si no, del mapa de usuarios
+    let patientAge = context.age;
+    if (patientAge === undefined && task.patientId && userMap.has(task.patientId)) {
+        // Asumiendo que el usuario tiene fecha de nacimiento o campo de edad
+        const user = userMap.get(task.patientId);
+        if (user.age) patientAge = user.age;
+        else if (user.birthDate) {
+             // Cálculo rápido de edad si hay fecha de nacimiento
+             const birth = user.birthDate.toDate ? user.birthDate.toDate() : new Date(user.birthDate);
+             patientAge = new Date().getFullYear() - birth.getFullYear();
+        }
+    }
+
+    if (patientAge !== undefined) {
+        const ageBucket = getAgeBucket(patientAge);
 
         if (!cache.segmentedWorkload[ageBucket]) {
-          cache.segmentedWorkload[ageBucket] = {};
+            cache.segmentedWorkload[ageBucket] = {};
         }
         if (!cache.segmentedWorkload[ageBucket][load]) {
-          cache.segmentedWorkload[ageBucket][load] = { count: 0, totalScore: 0 };
+            cache.segmentedWorkload[ageBucket][load] = { count: 0, totalScore: 0 };
         }
 
         cache.segmentedWorkload[ageBucket][load].count++;
         cache.segmentedWorkload[ageBucket][load].totalScore += score;
-      }
+    }
 
-      // Factores Externos
-      const prevHistory = task.contextSnapshot.history?.previousTherapyHistory;
-      if (prevHistory) {
+    // Factores Externos
+    const prevHistory = context.history?.previousTherapyHistory;
+    if (prevHistory) {
         const k = `hist_${prevHistory}`;
         if (!cache.factorImpact[k]) cache.factorImpact[k] = { count: 0, totalScore: 0 };
         cache.factorImpact[k].count++;
         cache.factorImpact[k].totalScore += score;
-      }
     }
+    
   }
 
-  cache.totalActivePatients = uniquePatients.size;
   return cache;
 };

@@ -53,7 +53,7 @@ export default function AssignmentModal({
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [selectedTier, setSelectedTier] = useState<string>('EASY');
-  const [targetStat, setTargetStat] = useState<string>('str');
+  // Eliminado: const [targetStat, setTargetStat] = useState<string>('str'); (No se usaba)
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
   // Duración del Sprint (Semanas)
   const [durationWeeks, setDurationWeeks] = useState<number>(1);
@@ -77,7 +77,9 @@ export default function AssignmentModal({
       if (taskToEdit) {
         // MODO EDICIÓN
         setTitle(taskToEdit.title || '');
-        setDesc(taskToEdit.description || '');
+        // CORRECCIÓN: Usar customInstructions en lugar de description
+        setDesc(taskToEdit.customInstructions || '');
+        
         const type = taskToEdit.type === 'routine' ? 'daily' : 'one-off';
         setMissionType(type);
         setSelectedDays(taskToEdit.frequency ? Object.keys(taskToEdit.frequency) : []);
@@ -89,7 +91,6 @@ export default function AssignmentModal({
         const diff = taskToEdit.staticTaskData?.difficulty || 'EASY';
         setSelectedTier(diff);
 
-        setTargetStat('str'); // Valor por defecto
         setActiveTab('custom');
         // No cargamos stats en edición para no confundir visualmente
         setSelectedCatalogId(taskToEdit.catalogId || null);
@@ -104,7 +105,8 @@ export default function AssignmentModal({
   const resetForm = () => {
     setTitle(''); setDesc(''); setMissionType('one-off');
     setSelectedDays([]); setDurationWeeks(1);
-    setSelectedTier('EASY'); setTargetStat('str');
+    setSelectedTier('EASY'); 
+    // setTargetStat('str'); // Eliminado
     setActiveTab('custom');
     setSelectedCatalogId(null); setCurrentStats(null);
   };
@@ -148,6 +150,7 @@ export default function AssignmentModal({
     if (!t) return;
 
     setTitle(t.title || '');
+    // Nota: El catálogo sí suele tener 'description', aquí está bien leerlo de 't' (CatalogItem)
     setDesc(t.description || '');
     if (missionType !== 'daily') setSelectedTier(t.tier || 'EASY');
     setSelectedCatalogId(taskId);
@@ -216,7 +219,8 @@ export default function AssignmentModal({
 
       const commonData = {
         title, 
-        description: desc, 
+        // CORRECCIÓN: Guardamos como customInstructions para cumplir con la interfaz Assignment
+        customInstructions: desc, 
         staticTaskData: {
             originalTitle: title,
             category: categoryName,

@@ -1,3 +1,4 @@
+// src/components/ProfessionalDashboard.tsx
 import { useState, useEffect } from 'react';
 import {
   collection, query, where, getDocs, doc, updateDoc,
@@ -105,7 +106,7 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) =
             }}>
                <DoughnutChart percent={globalAdherence} color="#2196F3" size={70} label="Adherencia" />
                
-               {/* Sección de Carga Cognitiva Visual (Solicitada en V3) */}
+               {/* Sección de Carga Cognitiva Visual */}
                <div style={{marginTop:'12px', width:'100%', textAlign:'center'}}>
                    <div style={{fontSize:'10px', fontWeight:'bold', color:'#555', marginBottom:'4px', textTransform:'uppercase'}}>
                        Carga Activa ({activeTasks.length})
@@ -197,7 +198,7 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [assistants, setAssistants] = useState<any[]>([]);
   const [activePatients, setActivePatients] = useState<any[]>([]);
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  // LIMPIEZA: Se eliminó 'loading' ya que no se usaba en el render.
   const [profData, setProfData] = useState<any>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -212,7 +213,7 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [patientToApprove, setPatientToApprove] = useState<any>(null);
   const [manualCandidates, setManualCandidates] = useState<any[]>([]);
   const [manualIdToMerge, setManualIdToMerge] = useState<string>('');
-  const [processingMerge, setProcessingMerge] = useState(false);
+  // LIMPIEZA: Se eliminó 'processingMerge' ya que no se usaba en el render.
 
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState<any>(null);
@@ -225,8 +226,6 @@ export default function ProfessionalDashboard({ user }: Props) {
   useEffect(() => {
     loadData();
     
-    // Simulación de carga de catálogo (Diccionario local)
-    // En producción esto vendría de una colección "tags_dictionary" en Firestore
     const LOCAL_DICTIONARY = {
         "desvelo": "Insomnio",
         "no duermo": "Insomnio",
@@ -247,16 +246,14 @@ export default function ProfessionalDashboard({ user }: Props) {
   // Función Normalizadora (El "Cerebro" de los Tags)
   const normalizeTag = (rawText: string): string => {
       const lower = rawText.toLowerCase().trim();
-      // Si existe en el diccionario, devuelve el término oficial. Si no, devuelve el original formateado.
       if (tagsCatalog[lower]) {
           return tagsCatalog[lower];
       }
-      // Capitalizar primera letra si es nuevo
       return lower.charAt(0).toUpperCase() + lower.slice(1);
   };
 
   const loadData = async () => {
-    setLoading(true);
+    // setLoading(true); // Eliminado
     try {
       const profRef = doc(db, "professionals", user.uid);
       const profSnap = await getDoc(profRef);
@@ -294,7 +291,8 @@ export default function ProfessionalDashboard({ user }: Props) {
           setActivePatients(active);
         }
       }
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) { console.error(e); } 
+    // finally { setLoading(false); } // Eliminado
   };
 
   const handleGenerateAnalytics = async () => {
@@ -321,7 +319,7 @@ export default function ProfessionalDashboard({ user }: Props) {
 
   const handleExecuteMerge = async (shouldMerge: boolean) => {
     if (!patientToApprove) return;
-    setProcessingMerge(true);
+    // setProcessingMerge(true); // Eliminado
     try {
       const batch = writeBatch(db);
       const patRef = doc(db, "patients", patientToApprove.id);
@@ -349,7 +347,8 @@ export default function ProfessionalDashboard({ user }: Props) {
       }
       batch.update(patRef, {isAuthorized:true, [`careTeam.${teamKey}.active`]:true, [`careTeam.${teamKey}.status`]:'active', [`careTeam.${teamKey}.joinedAt`]:new Date().toISOString()});
       await batch.commit(); alert("✅ Listo"); setIsMergeModalOpen(false); loadData();
-    } catch(e:any){ console.error(e); alert(e.message); } finally { setProcessingMerge(false); }
+    } catch(e:any){ console.error(e); alert(e.message); } 
+    // finally { setProcessingMerge(false); } // Eliminado
   };
 
   const hasValidAttendance = (patient: any) => {

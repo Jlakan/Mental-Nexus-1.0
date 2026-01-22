@@ -11,6 +11,9 @@ import AdminCatalogTree from './AdminCatalogTree';
 import GameEconomyPanel from './GameEconomyPanel';
 import AdminBulkTools from './AdminBulkTools';
 
+// Tipos
+import { Assignment } from '../types'; // Asegúrate de que esta ruta apunte a tu definición de Assignment
+
 // Importaciones de Inteligencia
 import { analyzeCatalogBatch } from '../utils/ClinicalEngine';
 import { calculateAggregatedStats } from '../utils/PopulationAnalytics';
@@ -24,8 +27,7 @@ export default function AdminPanel() {
   const [pendingPros, setPendingPros] = useState<any[]>([]);
   const [globalConfig, setGlobalConfig] = useState({ appDownloadLink: '' });
   
-  // Estados de UI
-  const [loading, setLoading] = useState(false);
+  // Estados de UI (loading eliminado porque no se usaba en el render)
   const [savingConfig, setSavingConfig] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -41,9 +43,9 @@ export default function AdminPanel() {
 
   // --- 1. CARGA DE DATOS ---
   const fetchAll = async () => {
-    setLoading(true);
+    // setLoading(true); // Eliminado
     await Promise.all([fetchUsers(), fetchPendingRequests(), fetchConfig()]);
-    setLoading(false);
+    // setLoading(false); // Eliminado
   };
 
   useEffect(() => {
@@ -81,11 +83,13 @@ export default function AdminPanel() {
             getDocs(collection(db, "assigned_routines"))
         ]);
 
-        const missions = snapM.docs.map(d => ({ ...d.data(), id: d.id, type: 'mission' }));
-        const routines = snapR.docs.map(d => ({ ...d.data(), id: d.id, type: 'routine' }));
-        const allTasks = [...missions, ...routines];
+        // CORRECCIÓN APLICADA: Casting explícito a Assignment para evitar error de TypeScript
+        const allTasks = [
+          ...snapM.docs.map(d => ({ ...d.data(), id: d.id, type: 'mission' } as unknown as Assignment)),
+          ...snapR.docs.map(d => ({ ...d.data(), id: d.id, type: 'routine' } as unknown as Assignment))
+        ];
 
-        // Análisis de contenido
+        // Análisis de contenido (Un solo argumento)
         const contentStats = analyzeCatalogBatch(allTasks); 
         
         let statsArray = Array.isArray(contentStats) ? contentStats : Object.values(contentStats);
