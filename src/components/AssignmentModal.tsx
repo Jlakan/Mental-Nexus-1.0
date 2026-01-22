@@ -1,3 +1,4 @@
+// src/components/AssignmentModal.tsx
 import { useState, useEffect } from 'react';
 import {
   collection, getDocs, doc, getDoc, 
@@ -6,6 +7,9 @@ import {
 import { db } from '../services/firebase';
 import { MISSION_TIERS } from '../utils/gameRules';
 
+// ✅ CORRECCIÓN: Usamos 'import type' para evitar el error de exportación en tiempo de ejecución
+import type { Assignment } from '../utils/ClinicalEngine';
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -13,7 +17,8 @@ interface Props {
   professionalId: string;
   patientName: string;
   userProfessionId?: string;
-  taskToEdit?: any;
+  // CAMBIO: Tipado estricto
+  taskToEdit?: Assignment;
 }
 
 interface CatalogItem { id: string; name?: string; title?: string; [key:string]: any }
@@ -50,8 +55,9 @@ export default function AssignmentModal({
   const [selectedTier, setSelectedTier] = useState<string>('EASY');
   const [targetStat, setTargetStat] = useState<string>('str');
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
-  // NUEVO: Duración del Sprint (Semanas)
+  // Duración del Sprint (Semanas)
   const [durationWeeks, setDurationWeeks] = useState<number>(1);
+  
   // --- CATALOG DATA ---
   const [profNameDisplay, setProfNameDisplay] = useState('');
   const [cats, setCats] = useState<CatalogItem[]>([]);
@@ -74,13 +80,19 @@ export default function AssignmentModal({
         setDesc(taskToEdit.description || '');
         const type = taskToEdit.type === 'routine' ? 'daily' : 'one-off';
         setMissionType(type);
-        setSelectedDays(taskToEdit.frequency || []);
-        setDurationWeeks(taskToEdit.durationWeeks || 1);
-        setSelectedTier(taskToEdit.tierId || (type === 'daily' ? 'DAILY' : 'EASY'));
-        setTargetStat(taskToEdit.targetStat || 'str');
+        setSelectedDays(taskToEdit.frequency ? Object.keys(taskToEdit.frequency) : []);
+        setDurationWeeks(taskToEdit.totalVolumeExpected && taskToEdit.frequency 
+            ? Math.ceil(taskToEdit.totalVolumeExpected / Object.keys(taskToEdit.frequency).length) 
+            : 1);
+        
+        // Ajuste defensivo para el Tier
+        const diff = taskToEdit.staticTaskData?.difficulty || 'EASY';
+        setSelectedTier(diff);
+
+        setTargetStat('str'); // Valor por defecto
         setActiveTab('custom');
         // No cargamos stats en edición para no confundir visualmente
-        setSelectedCatalogId(taskToEdit.originalCatalogId || null);
+        setSelectedCatalogId(taskToEdit.catalogId || null);
         setCurrentStats(null);
       } else {
         // MODO CREACIÓN (Reset)
@@ -141,10 +153,10 @@ export default function AssignmentModal({
     setSelectedCatalogId(taskId);
 
     try {
-      // Stats Globales (del Catálogo)
+      // Stats Globales
       const globalAssigned = t.stats?.globalAssigned || 0;
 
-      // Stats Personales (Subcolección del Profesional)
+      // Stats Personales
       const myStatsRef = doc(db, "professionals", professionalId, "personal_task_stats", taskId);
       const myStatsSnap = await getDoc(myStatsRef);
 
@@ -182,7 +194,6 @@ export default function AssignmentModal({
       const targetCol = missionType === 'daily' ? "assigned_routines" : "assigned_missions";
 
       // Cálculo de Volumen Esperado
-      // Misión única = 1. Rutina = (Días * Semanas).
       const currentVolume = missionType === 'daily' ? (selectedDays.length * durationWeeks) : 1;
 
       // Cálculo Fecha Fin (End Date)
@@ -191,54 +202,51 @@ export default function AssignmentModal({
       if (missionType === 'daily') {
         endDate.setDate(endDate.getDate() + (durationWeeks * 7));
       } else {
-        endDate.setDate(endDate.getDate() + 7); // Misiones únicas expiran en 1 semana por defecto visual
+        endDate.setDate(endDate.getDate() + 7); 
       }
 
+      // Generar mapa de frecuencias
+      const frequencyMap: {[key:string]: number} = {};
+      selectedDays.forEach(d => frequencyMap[d] = 1);
+
+      // --- CORRECCIÓN INTEGRIDAD DE DATOS ---
+      const categoryName = activeTab === 'catalog' 
+        ? (cats.find(c => c.id === selCat)?.name || "Catálogo") 
+        : "Personalizado";
+
       const commonData = {
-        title, description: desc, tierId: tierData.id,
-        rewards: { xp: tierData.xp, gold: tierData.gold, nexus: tierData.nexus||0, statValue: tierData.stats||0 },
-        targetStat: selectedTier === 'LEGENDARY' ? targetStat : null,
-        themeColor: tierData.color, type: missionType,
-        originalCatalogId: selectedCatalogId || null,
+        title, 
+        description: desc, 
+        staticTaskData: {
+            originalTitle: title,
+            category: categoryName,
+            difficulty: selectedTier,
+            estimatedLoad: tierData.stats || 3
+        },
+        rewards: { xp: tierData.xp, gold: tierData.gold }, 
+        type: missionType === 'daily' ? 'routine' : 'one_time',
+        
+        catalogId: activeTab === 'catalog' ? (selectedCatalogId || null) : null,
+        
         durationWeeks: missionType === 'daily' ? durationWeeks : null,
         totalVolumeExpected: currentVolume,
-        endDate: Timestamp.fromDate(endDate)
+        // Usamos any para evitar conflicto de tipos con Timestamp vs Date en la interfaz estricta
+        endDate: Timestamp.fromDate(endDate) as any
       };
 
       if (taskToEdit) {
-        // --- EDICIÓN CON CÁLCULO DE DELTA ---
+        // --- EDICIÓN ---
         const batch = writeBatch(db);
         const taskRef = doc(db, targetCol, taskToEdit.id);
 
-        // 1. Actualizar Tarea
         batch.update(taskRef, {
           ...commonData,
-          frequency: missionType === 'daily' ? selectedDays : null,
+          frequency: missionType === 'daily' ? frequencyMap : null,
           updatedAt: serverTimestamp(),
-          // Actualizamos el snapshot de volumen actual
-          originalVolumeSnapshot: currentVolume
         });
 
-        // 2. Si tenía un catálogo original vinculado, ajustar estadísticas
-        if (taskToEdit.originalCatalogId) {
-          const oldVolume = taskToEdit.originalVolumeSnapshot || 0;
-          const delta = currentVolume - oldVolume;
-
-          if (delta !== 0) {
-            // Ajuste en Stats Personales
-            const pStatsRef = doc(db, "professionals", professionalId, "personal_task_stats", taskToEdit.originalCatalogId);
-            batch.update(pStatsRef, {
-              volumeAssigned: increment(delta)
-            });
-
-            // Ajuste en Stats Globales (Requiere reconstruir path, asumimos que viene en taskToEdit o no lo tocamos para simplificar edit complex)
-            // Nota: Para editar stats globales necesitaríamos guardar el path completo del catálogo en la tarea.
-            // Por seguridad en este MVP, solo ajustamos la estadística PERSONAL del doctor al editar.
-          }
-        }
-
         await batch.commit();
-        alert("Tarea actualizada y proyecciones ajustadas.");
+        alert("Tarea actualizada correctamente.");
 
       } else {
         // --- CREACIÓN NUEVA (BATCH) ---
@@ -249,10 +257,14 @@ export default function AssignmentModal({
           ...commonData,
           id: newDocRef.id,
           patientId, professionalId,
-          frequency: missionType === 'daily' ? selectedDays : null,
-          status: 'pending', createdAt: serverTimestamp(),
-          progress: { completedCount: 0, targetCount: currentVolume },
-          originalVolumeSnapshot: currentVolume // Guardamos para futuros deltas
+          frequency: missionType === 'daily' ? frequencyMap : null,
+          status: 'pending', 
+          createdAt: serverTimestamp(),
+          completionHistory: [], // Requerido por la interfaz Assignment
+          
+          // 🔥🔥🔥 AQUÍ ESTÁ EL CAMBIO CLAVE 🔥🔥🔥
+          // Usamos new Date() para asegurar compatibilidad inmediata con el motor clínico
+          assignedAt: new Date() 
         };
 
         batch.set(newDocRef, createPayload);
@@ -290,9 +302,9 @@ export default function AssignmentModal({
       onClose();
       resetForm();
 
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("Error guardando.");
+      alert("Error guardando: " + e.message);
     } finally {
       setSaving(false);
     }

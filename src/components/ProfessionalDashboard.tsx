@@ -1,51 +1,259 @@
 import { useState, useEffect } from 'react';
-import { 
-  collection, query, where, getDocs, doc, updateDoc, 
-  arrayRemove, getDoc, increment, deleteDoc, arrayUnion, writeBatch, serverTimestamp 
+import {
+  collection, query, where, getDocs, doc, updateDoc,
+  arrayRemove, getDoc, increment, deleteDoc, arrayUnion, writeBatch, serverTimestamp
 } from "firebase/firestore";
 import { auth, db } from '../services/firebase';
-// Importamos la nueva agenda modular (Asegúrate de que este archivo exista)
+
+// Importamos componentes locales
 import AgendaView from './agenda';
 import AssignmentModal from './AssignmentModal';
 import HistoryModal from './HistoryModal';
 import DashboardMenu from './DashboardMenu';
+import { analyzeCatalogBatch } from '../utils/ClinicalEngine';
 
 interface Props {
   user: any;
 }
 
-export default function ProfessionalDashboard({ user }: Props) {
-  // --- ESTADOS NAVEGACIÓN ---
-  const [view, setView] = useState<'dashboard' | 'agenda' | 'team' | 'patients_manage' | 'patient_detail'>('dashboard');
+// --- COMPONENTE: GRÁFICO DE DONA CSS ---
+const DoughnutChart = ({ percent, color, size = 100, label }: any) => {
+  return (
+    <div style={{position:'relative', width: size, height: size, display:'flex', justifyContent:'center', alignItems:'center'}}>
+      <div style={{
+         position:'absolute', inset:0, borderRadius:'50%',
+         background: `conic-gradient(${color} ${percent}%, #E0E0E0 0)`
+      }}></div>
+      <div style={{
+         position:'absolute', inset:'8px', borderRadius:'50%', background:'white',
+         display:'flex', flexDirection:'column', justifyContent:'center', alignItems:'center'
+      }}>
+         <span style={{fontSize:'18px', fontWeight:'bold', color: '#333'}}>{percent}%</span>
+         {label && <span style={{fontSize:'9px', color:'#666', textTransform:'uppercase'}}>{label}</span>}
+      </div>
+    </div>
+  );
+};
 
-  // --- ESTADOS DATA ---
+// --- COMPONENTE: BARRA DE PROGRESO DE TAREA ---
+const TaskProgressBar = ({ task }: { task: any }) => {
+  const completed = task.completionHistory?.length || 0;
+  const total = task.totalVolumeExpected || 1;
+  const percent = Math.min(100, Math.round((completed / total) * 100));
+
+  const createdAt = task.createdAt?.toDate ? task.createdAt.toDate() : new Date();
+  const now = new Date();
+  let durationDays = 7; 
+  if (task.durationWeeks) durationDays = task.durationWeeks * 7;
+  const endDate = new Date(createdAt);
+  endDate.setDate(endDate.getDate() + durationDays);
+  const totalTime = endDate.getTime() - createdAt.getTime();
+  const elapsedTime = now.getTime() - createdAt.getTime();
+  const timePercent = Math.min(100, Math.max(0, (elapsedTime / totalTime) * 100));
+
+  let statusColor = '#4CAF50'; 
+  let statusText = 'A tiempo';
+  if (percent >= 100) { statusColor = '#2E7D32'; statusText = 'Completada'; }
+  else if (percent < (timePercent - 15)) { statusColor = '#F44336'; statusText = 'Atrasado'; }
+  else if (percent > timePercent + 10) { statusColor = '#2196F3'; statusText = 'Adelantado'; }
+
+  return (
+    <div style={{marginTop:'10px'}}>
+      <div style={{display:'flex', justifyContent:'space-between', fontSize:'11px', marginBottom:'3px', color:'#666'}}>
+        <span>{completed}/{total} reps</span>
+        <span style={{color: statusColor, fontWeight:'bold'}}>{statusText}</span>
+      </div>
+      <div style={{width:'100%', height:'6px', background:'#eee', borderRadius:'3px', overflow:'hidden', position:'relative'}}>
+        <div style={{width:`${percent}%`, height:'100%', background: statusColor, transition:'width 0.5s ease', borderRadius:'3px'}}></div>
+        {percent < 100 && <div style={{position:'absolute', top:0, bottom:0, width:'2px', background:'rgba(0,0,0,0.3)', left:`${timePercent}%`, zIndex:2}} title="Meta hoy" />}
+      </div>
+    </div>
+  );
+};
+
+// --- COMPONENTE VISUAL STATS (INTEGRADO: TAGS + CARGA COGNITIVA) ---
+const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) => {
+    const [newTag, setNewTag] = useState('');
+
+    const activeTasks = tasks.filter((t:any) => t.status !== 'completed');
+    const completedTasks = tasks.filter((t:any) => t.status === 'completed');
+    
+    // Cálculos de Adherencia
+    let totalExpected = 0;
+    let totalDone = 0;
+    activeTasks.forEach((t:any) => {
+        totalExpected += (t.totalVolumeExpected || 1);
+        totalDone += (t.completionHistory?.length || 0);
+    });
+    const globalAdherence = totalExpected > 0 ? Math.round((totalDone / totalExpected) * 100) : 0;
+
+    // Cálculos de Carga Cognitiva
+    const routinesCount = activeTasks.filter((t:any) => t.type === 'routine').length;
+    const missionsCount = activeTasks.filter((t:any) => t.type !== 'routine').length;
+
+    return (
+        <div style={{
+            background:'white', borderRadius:'12px', padding:'0', 
+            boxShadow:'0 2px 8px rgba(0,0,0,0.05)', marginBottom:'20px', 
+            display:'flex', overflow:'hidden', minHeight:'160px'
+        }}>
+            
+            {/* 1. IZQUIERDA: ADHERENCIA + CARGA COGNITIVA */}
+            <div style={{
+                padding:'15px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', 
+                minWidth:'160px', borderRight:'1px solid #f0f0f0', background:'#FAFAFA'
+            }}>
+               <DoughnutChart percent={globalAdherence} color="#2196F3" size={70} label="Adherencia" />
+               
+               {/* Sección de Carga Cognitiva Visual (Solicitada en V3) */}
+               <div style={{marginTop:'12px', width:'100%', textAlign:'center'}}>
+                   <div style={{fontSize:'10px', fontWeight:'bold', color:'#555', marginBottom:'4px', textTransform:'uppercase'}}>
+                       Carga Activa ({activeTasks.length})
+                   </div>
+                   <div style={{display:'flex', justifyContent:'center', gap:'8px', fontSize:'11px'}}>
+                       <span style={{color:'#9C27B0', fontWeight:'bold', background:'#F3E5F5', padding:'2px 6px', borderRadius:'4px'}}>
+                           🟣 {routinesCount} Rut
+                       </span>
+                       <span style={{color:'#E65100', fontWeight:'bold', background:'#FFF3E0', padding:'2px 6px', borderRadius:'4px'}}>
+                           🟠 {missionsCount} Mis
+                       </span>
+                   </div>
+               </div>
+            </div>
+
+            {/* 2. CENTRO: PANEL DE TAGS (CON VISIBILIDAD GARANTIZADA) */}
+            <div style={{flex: 1, padding:'20px', display:'flex', flexDirection:'column', background:'white'}}>
+               <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
+                  <h4 style={{margin:0, color:'#37474F', fontSize:'12px', textTransform:'uppercase', fontWeight:'bold'}}>
+                      🏷️ Vocabulario Clínico (Tags)
+                  </h4>
+                  <span style={{fontSize:'10px', color:'#999'}}>{indicators.length} activos</span>
+               </div>
+               
+               {/* Área de Scroll de Tags con Altura Mínima Reservada */}
+               <div style={{
+                   flex:1, 
+                   minHeight:'60px', /* Garantiza espacio aunque esté vacío */
+                   maxHeight:'90px', 
+                   overflowY:'auto', 
+                   display:'flex', 
+                   flexWrap:'wrap', 
+                   gap:'6px', 
+                   alignContent:'flex-start', 
+                   marginBottom:'10px'
+               }}>
+                   {indicators.length === 0 && (
+                       <div style={{fontSize:'11px', color:'#ccc', fontStyle:'italic', width:'100%', marginTop:'5px'}}>
+                           Sin observaciones. Escribe abajo para agregar...
+                       </div>
+                   )}
+                   {indicators.map((tag: string, i: number) => (
+                       <span key={i} style={{background:'#FFF9C4', border:'1px solid #FFF59D', padding:'3px 8px', borderRadius:'12px', fontSize:'11px', color:'#444', display:'flex', alignItems:'center', gap:'5px'}}>
+                          {tag}
+                          <button 
+                            onClick={() => onDeleteTag(tag)}
+                            style={{border:'none', background:'none', color:'#D32F2F', cursor:'pointer', fontWeight:'bold', fontSize:'14px', lineHeight:1, padding:0}}
+                          >×</button>
+                       </span>
+                   ))}
+               </div>
+
+               {/* Input Integrado */}
+               <div style={{display:'flex', background:'white', border:'1px solid #e0e0e0', borderRadius:'6px', padding:'2px 5px'}}>
+                  <input 
+                    value={newTag}
+                    onChange={(e) => setNewTag(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') { onAddTag(newTag); setNewTag(''); }
+                    }}
+                    placeholder="+ Agregar observación (ej. 'ansiedad')..." 
+                    style={{border:'none', flex:1, fontSize:'12px', outline:'none', padding:'6px'}}
+                  />
+                  <button 
+                    onClick={() => { onAddTag(newTag); setNewTag(''); }}
+                    style={{background:'none', border:'none', color:'#2196F3', fontWeight:'bold', cursor:'pointer', fontSize:'11px', textTransform:'uppercase'}}
+                  >
+                    Guardar
+                  </button>
+               </div>
+            </div>
+
+            {/* 3. DERECHA: HISTÓRICO */}
+            <div style={{
+                padding:'20px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', 
+                minWidth:'100px', borderLeft:'1px solid #f0f0f0'
+            }}>
+               <div style={{fontSize:'24px', fontWeight:'bold', color:'#4CAF50', lineHeight:1}}>{completedTasks.length}</div>
+               <div style={{fontSize:'10px', color:'#666', textTransform:'uppercase', textAlign:'center', marginTop:'5px'}}>Completadas</div>
+               <div style={{fontSize:'24px', marginTop:'5px'}}>🏆</div>
+            </div>
+        </div>
+    );
+};
+
+export default function ProfessionalDashboard({ user }: Props) {
+  // --- ESTADOS ---
+  const [view, setView] = useState<'dashboard' | 'agenda' | 'team' | 'patients_manage' | 'patient_detail' | 'analytics'>('dashboard');
   const [assistants, setAssistants] = useState<any[]>([]);
   const [activePatients, setActivePatients] = useState<any[]>([]);
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [profData, setProfData] = useState<any>(null);
-
-  // --- ESTADOS PACIENTE ---
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
   const [patientTasks, setPatientTasks] = useState<any[]>([]);
+  
+  const [interventionStats, setInterventionStats] = useState<any[]>([]);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
 
-  // --- ESTADOS DE FUSIÓN (MERGE) ---
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
-  const [patientToApprove, setPatientToApprove] = useState<any>(null); // El usuario de la App
-  const [manualCandidates, setManualCandidates] = useState<any[]>([]); // Posibles duplicados manuales
-  const [manualIdToMerge, setManualIdToMerge] = useState<string>(''); // ID seleccionado para fusionar
+  const [patientToApprove, setPatientToApprove] = useState<any>(null);
+  const [manualCandidates, setManualCandidates] = useState<any[]>([]);
+  const [manualIdToMerge, setManualIdToMerge] = useState<string>('');
   const [processingMerge, setProcessingMerge] = useState(false);
 
-  // --- MODALS ---
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState<any>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [newIndicator, setNewIndicator] = useState('');
+  const [taskForHistory, setTaskForHistory] = useState<any>(null);
+
+  // --- 1. LÓGICA DE VOCABULARIO CONTROLADO ---
+  const [tagsCatalog, setTagsCatalog] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadData();
+    
+    // Simulación de carga de catálogo (Diccionario local)
+    // En producción esto vendría de una colección "tags_dictionary" en Firestore
+    const LOCAL_DICTIONARY = {
+        "desvelo": "Insomnio",
+        "no duermo": "Insomnio",
+        "triste": "Bajo Estado de Ánimo",
+        "tristeza": "Bajo Estado de Ánimo",
+        "llanto": "Labilidad Emocional",
+        "nervioso": "Ansiedad",
+        "nervios": "Ansiedad",
+        "panico": "Crisis de Pánico",
+        "miedo": "Temor",
+        "cansado": "Fatiga",
+        "agotado": "Fatiga"
+    };
+    setTagsCatalog(LOCAL_DICTIONARY);
+
   }, [user]);
+
+  // Función Normalizadora (El "Cerebro" de los Tags)
+  const normalizeTag = (rawText: string): string => {
+      const lower = rawText.toLowerCase().trim();
+      // Si existe en el diccionario, devuelve el término oficial. Si no, devuelve el original formateado.
+      if (tagsCatalog[lower]) {
+          return tagsCatalog[lower];
+      }
+      // Capitalizar primera letra si es nuevo
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -56,520 +264,315 @@ export default function ProfessionalDashboard({ user }: Props) {
       if (profSnap.exists()) {
         const data = profSnap.data();
         setProfData(data);
-
-        // Cargar Asistentes
-        if (data.authorizedAssistants && data.authorizedAssistants.length > 0) {
+        if (data.authorizedAssistants?.length > 0) {
           const qAssist = query(collection(db, "users"), where("uid", "in", data.authorizedAssistants));
           const snapAssist = await getDocs(qAssist);
           setAssistants(snapAssist.docs.map(d => ({ uid: d.id, ...d.data() })));
-        } else {
-          setAssistants([]);
         }
-
-        // Cargar Pacientes
         if (data.professionalCode) {
           const qPats = query(collection(db, "patients"), where("linkedProfessionalCode", "==", data.professionalCode));
           const snapPats = await getDocs(qPats);
-
           const pending: any[] = [];
           const active: any[] = [];
-
           snapPats.docs.forEach(d => {
             const pData = d.data();
             const pId = d.id;
-
             let isMyPatientActive = false;
             if (pData.careTeam) {
               const myEntry = Object.values(pData.careTeam).find((entry: any) => entry.professionalId === user.uid);
               if (myEntry && (myEntry as any).active) isMyPatientActive = true;
             }
-
-            if (pData.isAuthorized === false || !isMyPatientActive) {
-              pending.push({ id: pId, ...pData });
-            } else {
-              active.push({ id: pId, ...pData });
-            }
+            if (pData.isAuthorized === false || !isMyPatientActive) pending.push({ id: pId, ...pData });
+            else active.push({ id: pId, ...pData });
           });
-
-          // Cargar pacientes manuales activos
           const qManual = query(collection(db, "patients"), where("linkedProfessionalId", "==", user.uid), where("isManual", "==", true));
           const snapManual = await getDocs(qManual);
           snapManual.docs.forEach(d => {
-            if(!active.find(p => p.id === d.id)) {
-              active.push({id: d.id, ...d.data()});
-            }
+            if(!active.find(p => p.id === d.id)) active.push({id: d.id, ...d.data()});
           });
-
           setPendingPatients(pending);
           setActivePatients(active);
         }
       }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // =================================================================
-  // LÓGICA DE FUSIÓN (MERGE)
-  // =================================================================
-
-  const handleOpenApproveModal = (patientApp: any) => {
-    setPatientToApprove(patientApp);
-    const candidates = activePatients.filter(p => p.isManual === true);
-    setManualCandidates(candidates);
-    setManualIdToMerge(''); 
-    setIsMergeModalOpen(true);
+  const handleGenerateAnalytics = async () => {
+    setLoadingAnalytics(true);
+    try {
+        const qM = query(collection(db, 'assigned_missions'), where('professionalId', '==', user.uid));
+        const qR = query(collection(db, 'assigned_routines'), where('professionalId', '==', user.uid));
+        const [snapM, snapR] = await Promise.all([getDocs(qM), getDocs(qR)]);
+        const extract = (d:any, t:string) => {
+            const da = d.data(); if(!da.catalogId) return null;
+            return { ...da, id: d.id, type: t, catalogId: da.catalogId, title: da.title||"S/T", completionHistory: da.completionHistory||[]};
+        };
+        const tasks = [...snapM.docs.map(d=>extract(d,'mission')), ...snapR.docs.map(d=>extract(d,'routine'))].filter(Boolean);
+        let stats: any = analyzeCatalogBatch(tasks);
+        if(!Array.isArray(stats)) stats = Object.values(stats);
+        stats.sort((a:any,b:any)=>b.globalSuccessRate-a.globalSuccessRate);
+        setInterventionStats(stats); setAnalyticsLoaded(true);
+    } catch (e) { console.error(e); alert("Error reporte"); } finally { setLoadingAnalytics(false); }
   };
+  const topPerformer = interventionStats.length > 0 ? interventionStats[0] : null;
+  const mostAbandoned = [...interventionStats].sort((a,b) => b.dropoutRate - a.dropoutRate)[0];
+
+  const handleOpenApproveModal = (p: any) => { setPatientToApprove(p); setManualCandidates(activePatients.filter(x=>x.isManual)); setManualIdToMerge(''); setIsMergeModalOpen(true); };
 
   const handleExecuteMerge = async (shouldMerge: boolean) => {
     if (!patientToApprove) return;
     setProcessingMerge(true);
-
     try {
       const batch = writeBatch(db);
-      const appPatientRef = doc(db, "patients", patientToApprove.id);
-
-      let appTeamKey = 'general';
+      const patRef = doc(db, "patients", patientToApprove.id);
+      let teamKey = 'general';
       if (patientToApprove.careTeam) {
-        const found = Object.keys(patientToApprove.careTeam).find(k => patientToApprove.careTeam[k].professionalId === user.uid);
-        if (found) appTeamKey = found;
+        const k = Object.keys(patientToApprove.careTeam).find(k => patientToApprove.careTeam[k].professionalId === user.uid);
+        if(k) teamKey = k;
       }
-
-      // 1. CASO FUSIÓN
       if (shouldMerge && manualIdToMerge) {
-        const manualPatient = manualCandidates.find(p => p.id === manualIdToMerge);
-        if (!manualPatient) throw new Error("Paciente manual no encontrado");
+        const man = manualCandidates.find(x=>x.id===manualIdToMerge);
+        if(!man) throw new Error("Manual no encontrado");
+        const indics = man.clinicalIndicators?.[user.uid]||[];
+        if(indics.length) batch.update(patRef, {[`clinicalIndicators.${user.uid}`]: arrayUnion(...indics)});
+        const manTeam = man.careTeam?.[user.uid];
+        if(manTeam?.customPrice) batch.update(patRef, {[`careTeam.${teamKey}.customPrice`]: manTeam.customPrice});
+        if(manTeam?.noShowCount) batch.update(patRef, {[`careTeam.${teamKey}.noShowCount`]: manTeam.noShowCount});
 
-        const manualRef = doc(db, "patients", manualIdToMerge);
-
-        // A. Migrar Notas
-        const manualIndicators = manualPatient.clinicalIndicators?.[user.uid] || [];
-        if (manualIndicators.length > 0) {
-          batch.update(appPatientRef, {
-            [`clinicalIndicators.${user.uid}`]: arrayUnion(...manualIndicators)
-          });
-        }
-
-        // B. Migrar Datos de CareTeam
-        const manualTeamData = manualPatient.careTeam?.[user.uid];
-        if (manualTeamData) {
-           if(manualTeamData.customPrice) {
-             batch.update(appPatientRef, { [`careTeam.${appTeamKey}.customPrice`]: manualTeamData.customPrice });
-           }
-           if(manualTeamData.noShowCount) {
-             batch.update(appPatientRef, { [`careTeam.${appTeamKey}.noShowCount`]: manualTeamData.noShowCount });
-           }
-        }
-
-        // C. Actualizar Tareas
-        const qMissions = query(collection(db, "assigned_missions"), where("patientId", "==", manualIdToMerge));
-        const qRoutines = query(collection(db, "assigned_routines"), where("patientId", "==", manualIdToMerge));
-        const [snapM, snapR] = await Promise.all([getDocs(qMissions), getDocs(qRoutines)]);
-
-        snapM.docs.forEach(docSnap => {
-          batch.update(doc(db, "assigned_missions", docSnap.id), { patientId: patientToApprove.id });
-        });
-        snapR.docs.forEach(docSnap => {
-          batch.update(doc(db, "assigned_routines", docSnap.id), { patientId: patientToApprove.id });
-        });
-
-        // D. Eliminar Manual
-        batch.delete(manualRef);
+        const [qM, qR] = await Promise.all([
+             getDocs(query(collection(db,"assigned_missions"), where("patientId","==",manualIdToMerge))),
+             getDocs(query(collection(db,"assigned_routines"), where("patientId","==",manualIdToMerge)))
+        ]);
+        qM.forEach(d=>batch.update(doc(db,"assigned_missions",d.id),{patientId:patientToApprove.id}));
+        qR.forEach(d=>batch.update(doc(db,"assigned_routines",d.id),{patientId:patientToApprove.id}));
+        batch.delete(doc(db,"patients",manualIdToMerge));
       }
-
-      // 2. ACTIVACIÓN
-      batch.update(appPatientRef, {
-        isAuthorized: true,
-        [`careTeam.${appTeamKey}.active`]: true,
-        [`careTeam.${appTeamKey}.status`]: 'active',
-        [`careTeam.${appTeamKey}.joinedAt`]: new Date().toISOString()
-      });
-
-      await batch.commit();
-
-      alert(shouldMerge ? "✅ Pacientes fusionados y acceso aprobado." : "✅ Acceso aprobado (Nuevo expediente).");
-      setIsMergeModalOpen(false);
-      loadData(); 
-
-    } catch (e: any) {
-      console.error(e);
-      alert("Error en el proceso: " + e.message);
-    } finally {
-      setProcessingMerge(false);
-    }
+      batch.update(patRef, {isAuthorized:true, [`careTeam.${teamKey}.active`]:true, [`careTeam.${teamKey}.status`]:'active', [`careTeam.${teamKey}.joinedAt`]:new Date().toISOString()});
+      await batch.commit(); alert("✅ Listo"); setIsMergeModalOpen(false); loadData();
+    } catch(e:any){ console.error(e); alert(e.message); } finally { setProcessingMerge(false); }
   };
 
-  // =================================================================
-  // LÓGICA DE ASIGNACIÓN (CANDADO)
-  // =================================================================
-  const hasValidAttendance = (patient: any): boolean => {
-    if (!patient.lastAttendance) return false;
-    const myLastDate = patient.lastAttendance[user.uid];
-    if (!myLastDate) return false;
-
-    const dateObj = myLastDate.toDate ? myLastDate.toDate() : new Date(myLastDate);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - dateObj.getTime());
-    const diffHours = Math.ceil(diffTime / (1000 * 60 * 60));
-
-    return diffHours <= 72; // 3 días
+  const hasValidAttendance = (patient: any) => {
+    if (!patient?.lastAttendance?.[user.uid]) return false;
+    const d = patient.lastAttendance[user.uid].toDate ? patient.lastAttendance[user.uid].toDate() : new Date(patient.lastAttendance[user.uid]);
+    return Math.ceil(Math.abs(new Date().getTime()-d.getTime())/36e5) <= 72;
   };
 
   const handleRegisterAttendance = async () => {
-    if (!selectedPatient) return;
-    const currentBalance = profData?.nexusBalance || 0;
-    if (currentBalance < 1) return alert("❌ Sin saldo suficiente.");
+    if(!selectedPatient || (profData?.nexusBalance||0)<1) return alert("❌ Saldo insuficiente");
+    if(!window.confirm("¿Registrar asistencia? (-1 Nexus)")) return;
+    try {
+       const batch = writeBatch(db);
+       batch.update(doc(db,"professionals",user.uid),{nexusBalance:increment(-1),"metrics.nexusDistributed":increment(1)});
+       batch.update(doc(db,"patients",selectedPatient.id),{[`lastAttendance.${user.uid}`]:serverTimestamp(),"gamificationProfile.currentXp":increment(50),"gamificationProfile.wallet.nexus":increment(1)});
+       await batch.commit(); alert("✅ Asistencia OK");
+       setProfData((p:any)=>({...p, nexusBalance: p.nexusBalance-1}));
+       setSelectedPatient((p:any)=>({...p, lastAttendance:{...p.lastAttendance,[user.uid]:new Date()}}));
+       setTaskToEdit(null); setIsAssignmentModalOpen(true);
+    } catch(e){console.error(e);}
+  };
 
-    if (!window.confirm(`¿Registrar asistencia de HOY?\nCosto: 1 Nexus.\nPremio: +1 Nexus al paciente.`)) return;
+  const handleOpenCreateTask = () => { if(!hasValidAttendance(selectedPatient)) return handleRegisterAttendance(); setTaskToEdit(null); setIsAssignmentModalOpen(true); };
+  const handleOpenEditTask = (t:any) => { setTaskToEdit(t); setIsAssignmentModalOpen(true); };
+  const handleViewProgress = (t:any) => { setTaskForHistory(t); setIsHistoryOpen(true); };
+  const handleOpenPatient = async (p:any) => { setSelectedPatient(p); setView('patient_detail'); await loadPatientTasks(p.id); };
+  
+  const loadPatientTasks = async (pid:string) => {
+     try {
+        const [sM, sR] = await Promise.all([
+            getDocs(query(collection(db,"assigned_missions"),where("patientId","==",pid))),
+            getDocs(query(collection(db,"assigned_routines"),where("patientId","==",pid)))
+        ]);
+        const tasks = [...sM.docs.map(d=>({id:d.id,...d.data(),type:'mission'})), ...sR.docs.map(d=>({id:d.id,...d.data(),type:'routine'}))];
+        setPatientTasks(tasks.sort((a:any,b:any)=>(b.createdAt?.toDate?.()||0)-(a.createdAt?.toDate?.()||0)));
+     } catch(e){console.error(e);}
+  };
+  const handleDeleteTask = async (tid:string, isR:boolean) => {
+     if(!window.confirm("¿Eliminar?")) return;
+     await deleteDoc(doc(db, isR?"assigned_routines":"assigned_missions", tid));
+     loadPatientTasks(selectedPatient.id);
+  };
+
+  // --- LOGICA TAGS INTEGRADA CON NORMALIZACIÓN ---
+  const handleAddIndicator = async (text: string) => {
+    if (!text.trim() || !selectedPatient) return;
+    
+    // Aplicamos la normalización antes de guardar
+    const cleanTag = normalizeTag(text);
 
     try {
-      const batch = writeBatch(db);
-      const profRef = doc(db, "professionals", user.uid);
-      batch.update(profRef, { nexusBalance: increment(-1), "metrics.nexusDistributed": increment(1) });
-
-      const patRef = doc(db, "patients", selectedPatient.id);
-      batch.update(patRef, {
-        [`lastAttendance.${user.uid}`]: serverTimestamp(),
-        "gamificationProfile.currentXp": increment(50),
-        "gamificationProfile.wallet.nexus": increment(1)
-      });
-
-      await batch.commit();
-      alert("✅ Asistencia registrada.");
-
-      setProfData((prev: any) => ({...prev, nexusBalance: prev.nexusBalance - 1}));
-      setSelectedPatient((prev: any) => ({
-        ...prev,
-        lastAttendance: { ...prev.lastAttendance, [user.uid]: new Date() }
-      }));
-      setTaskToEdit(null);
-      setIsAssignmentModalOpen(true);
-
-    } catch (e) { console.error(e); }
-  };
-
-  const handleOpenCreateTask = () => {
-    if (!hasValidAttendance(selectedPatient)) return handleRegisterAttendance();
-    setTaskToEdit(null);
-    setIsAssignmentModalOpen(true);
-  };
-
-  const handleOpenEditTask = (task: any) => {
-    setTaskToEdit(task);
-    setIsAssignmentModalOpen(true);
-  };
-
-  // --- RESTO DE FUNCIONES ---
-  const handleOpenPatient = async (patient: any) => {
-    setSelectedPatient(patient);
-    setView('patient_detail');
-    await loadPatientTasks(patient.id);
-  };
-
-  const loadPatientTasks = async (patientId: string) => {
-    try {
-      const qM = query(collection(db, "assigned_missions"), where("patientId", "==", patientId));
-      const qR = query(collection(db, "assigned_routines"), where("patientId", "==", patientId));
-      const [snapM, snapR] = await Promise.all([getDocs(qM), getDocs(qR)]);
-      const missions = snapM.docs.map(d => ({ id: d.id, ...d.data(), type: 'mission' }));
-      const routines = snapR.docs.map(d => ({ id: d.id, ...d.data(), type: 'routine' }));
-      const all = [...missions, ...routines].sort((a: any, b: any) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0));
-      setPatientTasks(all);
-    } catch (e) { console.error(e); }
-  };
-
-  const handleDeleteTask = async (taskId: string, isRoutine: boolean) => {
-    if(!window.confirm("¿Eliminar tarea?")) return;
-    try {
-      await deleteDoc(doc(db, isRoutine ? "assigned_routines" : "assigned_missions", taskId));
-      loadPatientTasks(selectedPatient.id);
-    } catch (e) { console.error(e); }
-  };
-
-  const handleAddIndicator = async () => {
-    if (!newIndicator.trim() || !selectedPatient) return;
-    try {
-      await updateDoc(doc(db, "patients", selectedPatient.id), { [`clinicalIndicators.${user.uid}`]: arrayUnion(newIndicator.trim()) });
-      const currentMap = selectedPatient.clinicalIndicators || {};
-      const myList = currentMap[user.uid] || [];
-      setSelectedPatient({ ...selectedPatient, clinicalIndicators: { ...currentMap, [user.uid]: [...myList, newIndicator.trim()] } });
-      setNewIndicator('');
+      await updateDoc(doc(db, "patients", selectedPatient.id), { [`clinicalIndicators.${user.uid}`]: arrayUnion(cleanTag) });
+      const current = selectedPatient.clinicalIndicators?.[user.uid] || [];
+      // Evitar duplicados visuales si el tag normalizado ya existe
+      if (!current.includes(cleanTag)) {
+          setSelectedPatient({ ...selectedPatient, clinicalIndicators: { ...(selectedPatient.clinicalIndicators||{}), [user.uid]: [...current, cleanTag] } });
+      }
     } catch (e) { console.error(e); }
   };
 
   const handleDeleteIndicator = async (text: string) => {
     try {
       await updateDoc(doc(db, "patients", selectedPatient.id), { [`clinicalIndicators.${user.uid}`]: arrayRemove(text) });
-      const currentMap = selectedPatient.clinicalIndicators || {};
-      const myList = currentMap[user.uid] || [];
-      setSelectedPatient({ ...selectedPatient, clinicalIndicators: { ...currentMap, [user.uid]: myList.filter((t: string) => t !== text) } });
+      const current = selectedPatient.clinicalIndicators?.[user.uid] || [];
+      setSelectedPatient({ ...selectedPatient, clinicalIndicators: { ...(selectedPatient.clinicalIndicators||{}), [user.uid]: current.filter((t:string)=>t!==text) } });
     } catch (e) { console.error(e); }
   };
 
   const filteredPatients = activePatients.filter(p => p.fullName.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // =================================================================
-  // RENDERIZADO
-  // =================================================================
-  
-  // FIX: Usamos la variable loading para mostrar pantalla de carga
-  if (loading) return <div style={{padding:'50px', textAlign:'center', color:'#666', fontFamily:'sans-serif'}}>Cargando panel profesional...</div>;
-
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'sans-serif', background: '#F4F6F8' }}>
-
       <DashboardMenu activeView={view} onNavigate={setView} onLogout={() => auth.signOut()} />
-
       <div style={{ flex: 1, padding: '30px', maxWidth: '1200px', margin: '0 auto', overflowY: 'auto' }}>
-
+        
         {/* HEADER */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom:'1px solid #E0E0E0', paddingBottom:'20px' }}>
           <div>
-            <h1 style={{ margin: 0, color: '#37474F', fontSize: '24px' }}>
+             <h1 style={{ margin: 0, color: '#37474F', fontSize: '24px' }}>
               {view === 'dashboard' && 'Resumen General'}
               {view === 'patients_manage' && 'Gestión de Pacientes'}
               {view === 'agenda' && 'Mi Agenda'}
               {view === 'team' && 'Equipo Clínico'}
-              {view === 'patient_detail' && 'Expediente del Paciente'}
-            </h1>
-            <p style={{ margin: '5px 0', color: '#78909C' }}>Dr(a). {profData?.fullName}</p>
+              {view === 'patient_detail' && 'Expediente Clínico'}
+              {view === 'analytics' && 'Analítica de Intervención'}
+             </h1>
+             <p style={{ margin: '5px 0', color: '#78909C' }}>Dr(a). {profData?.fullName}</p>
           </div>
-
           <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-            {profData?.professionalCode && (
-              <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#1565C0', fontWeight:'bold', border:'1px solid #BBDEFB', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
-                🔑 {profData.professionalCode}
-              </span>
-            )}
-            <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#00695C', fontWeight:'bold', border:'1px solid #B2DFDB', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
-              💎 {profData?.nexusBalance || 0} Nexus
-            </span>
+             {profData?.professionalCode && <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#1565C0', fontWeight:'bold', border:'1px solid #BBDEFB' }}>🔑 {profData.professionalCode}</span>}
+             <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#00695C', fontWeight:'bold', border:'1px solid #B2DFDB' }}>💎 {profData?.nexusBalance || 0} Nexus</span>
           </div>
         </div>
 
-        {/* --- VISTA: AGENDA --- */}
-        {view === 'agenda' ? (
-          <AgendaView userRole="professional" currentUserId={user.uid} onBack={() => setView('dashboard')} />
-
-        ) : view === 'patients_manage' ? (
-          <div>
-            {/* SOLICITUDES PENDIENTES */}
-            {pendingPatients.length > 0 && (
-              <div style={{marginBottom:'30px', background:'#FFF3E0', padding:'20px', borderRadius:'10px', border:'1px solid #FFE0B2'}}>
-                <h3 style={{marginTop:0, color:'#E65100'}}>🔔 Solicitudes ({pendingPatients.length})</h3>
-                <div style={{display:'grid', gap:'10px', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))'}}>
-                  {pendingPatients.map(p => (
-                    <div key={p.id} style={{background:'white', padding:'15px', borderRadius:'8px', display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 2px 4px rgba(0,0,0,0.05)'}}>
-                      <div>
-                        <strong>{p.fullName}</strong>
-                        <div style={{fontSize:'12px', color:'#666'}}>{p.email}</div>
-                      </div>
-                      <button 
-                        onClick={() => handleOpenApproveModal(p)}
-                        style={{background:'#FF9800', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', cursor:'pointer', fontWeight:'bold'}}
-                      >
-                        Revisar
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* LISTA ACTIVOS */}
-            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
-              <h3 style={{color:'#455A64', margin:0}}>Pacientes Activos ({activePatients.length})</h3>
-              <input type="text" placeholder="🔍 Buscar paciente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{padding:'10px', borderRadius:'6px', border:'1px solid #CFD8DC', width:'250px'}} />
-            </div>
-
-            <div style={{background:'white', borderRadius:'10px', boxShadow:'0 2px 10px rgba(0,0,0,0.03)', overflow:'hidden'}}>
-              <table style={{width:'100%', borderCollapse:'collapse'}}>
-                <thead style={{background:'#ECEFF1', color:'#455A64'}}>
-                  <tr>
-                    <th style={{padding:'15px', textAlign:'left', fontSize:'13px', textTransform:'uppercase'}}>Nombre</th>
-                    <th style={{padding:'15px', textAlign:'left', fontSize:'13px', textTransform:'uppercase'}}>Contacto</th>
-                    <th style={{padding:'15px', textAlign:'center', fontSize:'13px', textTransform:'uppercase'}}>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredPatients.map(p => (
-                    <tr key={p.id} style={{borderBottom:'1px solid #eee'}}>
-                      <td style={{padding:'15px', fontWeight:'bold', color:'#37474F'}}>
-                        {p.fullName} {p.isManual && <span style={{fontSize:'10px', background:'#eee', padding:'2px 4px', borderRadius:'4px', color:'#666'}}>MANUAL</span>}
-                      </td>
-                      <td style={{padding:'15px', color:'#546E7A'}}>{p.email}</td>
-                      <td style={{padding:'15px', textAlign:'center'}}>
-                        <button onClick={() => handleOpenPatient(p)} style={{padding:'6px 15px', background:'#E3F2FD', color:'#1565C0', border:'none', borderRadius:'20px', cursor:'pointer', fontWeight:'bold', fontSize:'12px'}}>
-                          📂 Expediente
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredPatients.length === 0 && <tr><td colSpan={3} style={{padding:'20px', textAlign:'center', color:'#999'}}>No se encontraron pacientes.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        ) : view === 'dashboard' ? (
-          <div style={{textAlign:'center', padding:'40px'}}>
-             {/* ... contenido del dashboard dashboard ... */}
-             <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'20px'}}>
-               <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #2196F3'}}>
-                 <div style={{fontSize:'36px', fontWeight:'bold', color:'#2196F3', marginBottom:'5px'}}>{activePatients.length}</div>
-                 <div style={{color:'#546E7A', fontWeight:'bold'}}>Pacientes Activos</div>
-               </div>
-               <div style={{padding:'30px', background:'white', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', borderBottom:'4px solid #00BCD4'}}>
-                 <div style={{fontSize:'36px', fontWeight:'bold', color:'#00838F', marginBottom:'5px'}}>{profData?.nexusBalance || 0}</div>
-                 <div style={{color:'#546E7A', fontWeight:'bold'}}>Nexus Disponibles</div>
-               </div>
+        {view === 'agenda' ? <AgendaView userRole="professional" currentUserId={user.uid} onBack={() => setView('dashboard')} /> :
+         view === 'patients_manage' ? (
+           <div>
+             {pendingPatients.map(p=><div key={p.id} style={{background:'#FFF3E0', padding:'15px', marginBottom:'10px', borderRadius:'8px', display:'flex', justifyContent:'space-between'}}><div>{p.fullName}</div><button onClick={()=>handleOpenApproveModal(p)}>Revisar</button></div>)}
+             <div style={{display:'flex', justifyContent:'space-between', marginBottom:'15px'}}><h3 style={{margin:0}}>Activos ({activePatients.length})</h3><input placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} style={{padding:'8px'}}/></div>
+             <div style={{background:'white', borderRadius:'8px', overflow:'hidden'}}>
+               {filteredPatients.map(p=>(
+                 <div key={p.id} style={{padding:'15px', borderBottom:'1px solid #eee', display:'flex', justifyContent:'space-between'}}>
+                    <div><strong>{p.fullName}</strong><div style={{fontSize:'12px', color:'#666'}}>{p.email}</div></div>
+                    <button onClick={()=>handleOpenPatient(p)} style={{padding:'5px 15px', borderRadius:'15px', border:'none', background:'#E3F2FD', color:'#1565C0', cursor:'pointer'}}>Expediente</button>
+                 </div>
+               ))}
              </div>
-          </div>
-
-        ) : view === 'team' ? (
-          <div>
-            <h2>Equipo de Trabajo</h2>
-            {assistants.length === 0 ? <p style={{color:'#666'}}>No hay asistentes.</p> : assistants.map(a => <div key={a.uid} style={{padding:'10px', borderBottom:'1px solid #eee'}}>{a.displayName}</div>)}
-          </div>
-
-        ) : view === 'patient_detail' && selectedPatient ? (
-          <div style={{ paddingBottom: '50px' }}>
-            <button onClick={() => setView('patients_manage')} style={{marginBottom:'20px', background:'none', border:'none', color:'#666', cursor:'pointer', fontSize:'14px', display:'flex', alignItems:'center', gap:'5px'}}> ⬅ Volver </button>
-            <div style={{background:'white', padding:'25px', borderRadius:'12px', boxShadow:'0 4px 15px rgba(0,0,0,0.05)', marginBottom:'20px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-              <div>
-                <h1 style={{margin:'0 0 5px 0', color:'#1565C0', fontSize:'22px'}}>{selectedPatient.fullName}</h1>
-                <div style={{color:'#666', fontSize:'14px'}}>{selectedPatient.email} • {selectedPatient.contactNumber}</div>
-                <div style={{marginTop:'10px', display:'flex', gap:'10px'}}>
-                  <span style={{background:'#E1BEE7', color:'#4A148C', padding:'4px 10px', borderRadius:'15px', fontWeight:'bold', fontSize:'12px'}}>Nivel {selectedPatient.gamificationProfile?.level || 1}</span>
-                  <span style={{background:'#B3E5FC', color:'#0277BD', padding:'4px 10px', borderRadius:'15px', fontWeight:'bold', fontSize:'12px'}}>💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0} Nexus</span>
+           </div>
+         ) : view === 'dashboard' ? (
+            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:'20px', textAlign:'center'}}>
+               <div style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #2196F3'}}><h1>{activePatients.length}</h1>Pacientes</div>
+               <div style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #00BCD4'}}><h1>{profData?.nexusBalance||0}</h1>Nexus</div>
+               <div onClick={()=>setView('analytics')} style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #673AB7', cursor:'pointer'}}><h1>📊</h1>Analítica</div>
+            </div>
+         ) : view === 'analytics' ? (
+             <div>
+                {!analyticsLoaded && <button onClick={handleGenerateAnalytics} style={{padding:'15px', background:'#673AB7', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', width:'100%'}}>Generar Reporte Global</button>}
+                {loadingAnalytics && <p>Cargando...</p>}
+                {analyticsLoaded && (
+                   <div style={{background:'white', padding:'20px', borderRadius:'10px'}}>
+                      <h3>Top Rendimiento</h3>
+                      {topPerformer && <div style={{color:'#4CAF50'}}>🌟 {topPerformer.title} ({topPerformer.globalSuccessRate.toFixed(0)}% éxito)</div>}
+                      {mostAbandoned && <div style={{color:'#F44336'}}>⚠️ {mostAbandoned.title} ({mostAbandoned.dropoutRate.toFixed(0)}% abandono)</div>}
+                      <table style={{width:'100%', marginTop:'15px'}}>
+                         <thead><tr><th align="left">Tarea</th><th>Uso</th><th>Éxito</th></tr></thead>
+                         <tbody>{interventionStats.map((s,i)=><tr key={i}><td>{s.title}</td><td align="center">{s.usageCount}</td><td align="center">{s.globalSuccessRate.toFixed(0)}%</td></tr>)}</tbody>
+                      </table>
+                   </div>
+                )}
+             </div>
+         ) : view === 'team' ? (
+           <div><h2>Equipo</h2>{assistants.map(a=><div key={a.uid}>{a.displayName}</div>)}</div>
+         ) : view === 'patient_detail' && selectedPatient ? (
+           
+           <div style={{ paddingBottom: '50px' }}>
+             <button onClick={() => setView('patients_manage')} style={{marginBottom:'15px', background:'none', border:'none', color:'#666', cursor:'pointer'}}>⬅ Volver</button>
+             
+             {/* HEADER DETALLE PACIENTE */}
+             <div style={{background:'white', padding:'20px', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.05)', marginBottom:'15px', display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
+                <div>
+                   <h1 style={{margin:'0', color:'#1565C0', fontSize:'20px'}}>{selectedPatient.fullName}</h1>
+                   <div style={{color:'#666', fontSize:'13px', marginTop:'2px'}}>{selectedPatient.email} • {selectedPatient.contactNumber}</div>
+                   
+                   <div style={{marginTop:'8px', display:'flex', gap:'8px'}}>
+                      <span style={{background:'#E1BEE7', color:'#4A148C', padding:'3px 8px', borderRadius:'12px', fontSize:'11px', fontWeight:'bold'}}>
+                         Nivel {selectedPatient.gamificationProfile?.level || 1}
+                      </span>
+                      <span style={{background:'#B3E5FC', color:'#0277BD', padding:'3px 8px', borderRadius:'12px', fontSize:'11px', fontWeight:'bold'}}>
+                         💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0}
+                      </span>
+                   </div>
                 </div>
-              </div>
-              <div style={{display:'flex', flexDirection:'column', gap:'10px', alignItems:'flex-end'}}>
+             </div>
+
+             {/* DASHBOARD VISUAL (Con Tags Normalizados y Carga Cognitiva) */}
+             <PatientVisualStats 
+                tasks={patientTasks} 
+                indicators={selectedPatient.clinicalIndicators?.[user.uid] || []}
+                onAddTag={handleAddIndicator}
+                onDeleteTag={handleDeleteIndicator}
+             />
+
+             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
+                 <h3 style={{color:'#455A64', margin:0, fontSize:'16px'}}>Plan Activo</h3>
                  <div style={{display:'flex', gap:'10px'}}>
-                    <button onClick={() => setIsHistoryOpen(true)} style={{padding:'10px 15px', background:'#607D8B', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>📜 Historial</button>
-                    <button onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance} style={{padding:'10px 20px', background: hasValidAttendance(selectedPatient) ? '#2196F3' : '#E0E0E0', color: hasValidAttendance(selectedPatient) ? 
-                      'white' : '#757575', border: hasValidAttendance(selectedPatient) ? 'none' : '1px solid #ccc', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', display:'flex', alignItems:'center', gap:'8px'}}>
-                      {hasValidAttendance(selectedPatient) ? <>+ Asignar Tarea</> : <>🔒 Registrar Asistencia</>}
+                    <button onClick={() => { setTaskForHistory(null); setIsHistoryOpen(true); }} style={{padding:'8px 15px', background:'#607D8B', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', fontSize:'12px'}}>📜 Historial</button>
+                    <button onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance} style={{padding:'8px 15px', background: hasValidAttendance(selectedPatient) ? '#2196F3' : '#E0E0E0', color: hasValidAttendance(selectedPatient) ? 'white' : '#757575', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', fontSize:'12px'}}>
+                       {hasValidAttendance(selectedPatient) ? '+ Asignar' : '🔒 Asistencia'}
                     </button>
                  </div>
-              </div>
-            </div>
+             </div>
 
-            {/* NOTAS */}
-            <div style={{background:'#FFFDE7', padding:'20px', borderRadius:'8px', border:'1px solid #FFF59D', marginBottom:'25px'}}>
-              <h3 style={{marginTop:0, color:'#F57F17', fontSize:'16px'}}>🔓 Notas Clínicas</h3>
-              <div style={{display:'flex', gap:'10px', marginBottom:'15px'}}>
-                <input value={newIndicator} onChange={(e) => setNewIndicator(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddIndicator()} placeholder="Nota rápida..." style={{flex:1, padding:'10px', borderRadius:'4px', border:'1px solid #FBC02D'}} />
-                <button onClick={handleAddIndicator} style={{background:'#FBC02D', color:'#333', border:'none', padding:'0 20px', borderRadius:'4px', cursor:'pointer'}}>Agregar</button>
-              </div>
-              <div style={{display:'flex', flexWrap:'wrap', gap:'8px'}}>
-                {(selectedPatient.clinicalIndicators?.[user.uid] || []).map((item: string, idx: number) => (
-                  <div key={idx} style={{background:'white', border:'1px solid #FFF176', padding:'5px 12px', borderRadius:'20px', fontSize:'14px', color:'#555', display:'flex', alignItems:'center', gap:'8px'}}>
-                    • {item} <button onClick={() => handleDeleteIndicator(item)} style={{border:'none', background:'none', cursor:'pointer', color:'#D32F2F', fontWeight:'bold'}}> ✕ </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* TAREAS */}
-            <h3 style={{color:'#455A64'}}>Misiones y Rutinas</h3>
-            {patientTasks.filter(t => t.status !== 'completed').length === 0 ? <p style={{color:'#999'}}>No hay tareas activas.</p> : (
-              <div style={{display:'grid', gap:'10px'}}>
-                {patientTasks.filter(t => t.status !== 'completed').map(t => (
-                  <div key={t.id} style={{background:'white', padding:'15px', borderRadius:'8px', borderLeft:`5px solid ${t.themeColor || '#ccc'}`, display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 2px 5px rgba(0,0,0,0.05)'}}>
-                    <div>
-                      <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-                        <span style={{fontSize:'10px', padding:'2px 6px', borderRadius:'4px', color:'white', background: t.type === 'routine' ? '#9C27B0' : '#E65100'}}>{t.type === 'routine' ? 'RUTINA' : 'MISIÓN'}</span>
-                        <strong style={{color:'#333'}}>{t.title}</strong>
+             {/* LISTA DE TAREAS */}
+             {patientTasks.filter(t => t.status !== 'completed').length === 0 ? 
+               <div style={{textAlign:'center', padding:'30px', background:'white', borderRadius:'8px', color:'#999'}}>Sin tareas activas.</div> 
+               : (
+               <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:'15px'}}>
+                 {patientTasks.filter(t => t.status !== 'completed').map(t => {
+                    const borderColor = t.themeColor || (t.type === 'routine' ? '#9C27B0' : '#E65100');
+                    return (
+                      <div key={t.id} style={{background:'white', padding:'15px', borderRadius:'8px', borderTop:`4px solid ${borderColor}`, boxShadow:'0 2px 5px rgba(0,0,0,0.05)'}}>
+                         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px'}}>
+                            <div>
+                               <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
+                                  <span style={{fontSize:'10px', fontWeight:'bold', color: borderColor, textTransform:'uppercase'}}>
+                                     {t.type === 'routine' ? 'Rutina' : 'Misión'}
+                                  </span>
+                               </div>
+                               <div style={{fontWeight:'bold', color:'#333', fontSize:'14px', lineHeight:'1.3'}}>{t.title}</div>
+                            </div>
+                            <div style={{display:'flex', gap:'5px'}}>
+                                <button onClick={() => handleViewProgress(t)} title="Ver Bitácora" style={{border:'1px solid #BBDEFB', background:'#E3F2FD', color:'#1565C0', borderRadius:'4px', fontSize:'10px', fontWeight:'bold', padding:'4px 8px', cursor:'pointer', display:'flex', alignItems:'center', gap:'3px'}}>👁️ Bitácora</button>
+                                <button onClick={() => handleOpenEditTask(t)} style={{border:'none', background:'#F5F5F5', color:'#555', borderRadius:'4px', width:'24px', height:'24px', cursor:'pointer'}}>✏️</button>
+                                <button onClick={() => handleDeleteTask(t.id, t.type === 'routine')} style={{border:'none', background:'#FFEBEE', color:'#D32F2F', borderRadius:'4px', width:'24px', height:'24px', cursor:'pointer'}}>🗑️</button>
+                            </div>
+                         </div>
+                         <div style={{fontSize:'12px', color:'#666', marginBottom:'12px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{t.description || "Sin instrucciones."}</div>
+                         <TaskProgressBar task={t} />
                       </div>
-                      <div style={{fontSize:'13px', color:'#666'}}>{t.description}</div>
-                    </div>
-                    <div style={{display:'flex', gap:'10px'}}>
-                      <button onClick={() => handleOpenEditTask(t)} style={{border:'none', background:'none', cursor:'pointer', fontSize:'18px'}}>✏️</button>
-                      <button onClick={() => handleDeleteTask(t.id, t.type === 'routine')} style={{color:'#D32F2F', background:'none', border:'none', cursor:'pointer', fontSize:'18px'}}>🗑️</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <AssignmentModal isOpen={isAssignmentModalOpen} onClose={() => { setIsAssignmentModalOpen(false); setTaskToEdit(null); loadPatientTasks(selectedPatient.id); }} patientId={selectedPatient.id} professionalId={user.uid} patientName={selectedPatient.fullName} userProfessionId={profData?.professionType || 'psychologist'} taskToEdit={taskToEdit} />
-            <HistoryModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} patientId={selectedPatient.id} patientName={selectedPatient.fullName} />
-          </div>
-        ) : null}
+                    );
+                 })}
+               </div>
+             )}
 
+             <AssignmentModal isOpen={isAssignmentModalOpen} onClose={() => { setIsAssignmentModalOpen(false); setTaskToEdit(null); loadPatientTasks(selectedPatient.id); }} patientId={selectedPatient.id} professionalId={user.uid} patientName={selectedPatient.fullName} userProfessionId={profData?.professionType || 'psychologist'} taskToEdit={taskToEdit} />
+             <HistoryModal isOpen={isHistoryOpen} onClose={() => { setIsHistoryOpen(false); setTaskForHistory(null); }} patientId={selectedPatient.id} patientName={selectedPatient.fullName} specificTask={taskForHistory} />
+           </div>
+         ) : null}
       </div>
 
-      {/* --- MODAL DE FUSIÓN DE PACIENTES --- */}
       {isMergeModalOpen && patientToApprove && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
-          <div style={{ background: 'white', padding: '30px', borderRadius: '12px', width: '500px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h2 style={{ marginTop: 0, color: '#1565C0' }}>🔗 Fusión de Expedientes</h2>
-            <p style={{ color: '#555', lineHeight: '1.5' }}>
-              El usuario <strong>{patientToApprove.fullName}</strong> ({patientToApprove.email}) ha solicitado acceso a través de la App.
-              <br /><br />
-              ¿Este usuario corresponde a algún paciente que ya tenías registrado manualmente?
-            </p>
-
-            {manualCandidates.length > 0 ? (
-              <div style={{ marginBottom: '20px', background: '#F5F5F5', padding: '15px', borderRadius: '8px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: 'bold', color: '#666' }}>Selecciona el expediente manual a fusionar:</label>
-                <select 
-                  value={manualIdToMerge} 
-                  onChange={(e) => setManualIdToMerge(e.target.value)}
-                  style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
-                >
-                  <option value="">-- No, es un paciente nuevo --</option>
-                  {manualCandidates.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.fullName} (Manual)
-                    </option>
-                  ))}
-                </select>
-                {manualIdToMerge && (
-                  <p style={{fontSize:'12px', color:'#E65100', marginTop:'10px'}}>
-                    ⚠️ Al fusionar, se moverán las notas, misiones y rutinas del paciente manual al nuevo usuario, y <b>se eliminará el registro manual duplicado.</b>
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div style={{ padding: '15px', background: '#E3F2FD', borderRadius: '8px', marginBottom: '20px', color: '#0277BD', fontSize: '13px' }}>
-                ℹ️ No se encontraron pacientes manuales activos para sugerir, pero puedes aprobarlo como nuevo.
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button 
-                onClick={() => setIsMergeModalOpen(false)}
-                disabled={processingMerge}
-                style={{ padding: '10px 20px', background: '#ECEFF1', border: 'none', borderRadius: '4px', color: '#546E7A', cursor: 'pointer' }}
-              >
-                Cancelar
-              </button>
-              
-              {manualIdToMerge ? (
-                <button 
-                  onClick={() => handleExecuteMerge(true)}
-                  disabled={processingMerge}
-                  style={{ padding: '10px 20px', background: '#FF9800', border: 'none', borderRadius: '4px', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
-                >
-                  {processingMerge ? 'Procesando...' : '🔄 Fusionar y Aprobar'}
-                </button>
-              ) : (
-                <button 
-                  onClick={() => handleExecuteMerge(false)}
-                  disabled={processingMerge}
-                  style={{ padding: '10px 20px', background: '#4CAF50', border: 'none', borderRadius: '4px', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
-                >
-                  {processingMerge ? 'Procesando...' : '✅ Aprobar como Nuevo'}
-                </button>
-              )}
-            </div>
-          </div>
+           <div style={{ background: 'white', padding: '30px', borderRadius: '12px', width: '400px' }}>
+              <h3>Fusión de Expediente</h3>
+              <p>¿Fusionar a <b>{patientToApprove.fullName}</b> con un manual?</p>
+              <select value={manualIdToMerge} onChange={e=>setManualIdToMerge(e.target.value)} style={{width:'100%', marginBottom:'10px', padding:'8px'}}>
+                 <option value="">No, crear nuevo</option>
+                 {manualCandidates.map(c=><option key={c.id} value={c.id}>{c.fullName} (Manual)</option>)}
+              </select>
+              <button onClick={()=>handleExecuteMerge(!!manualIdToMerge)}>Confirmar</button>
+           </div>
         </div>
       )}
-
     </div>
   );
 }
