@@ -1,27 +1,26 @@
 // src/components/PatientDashboard.tsx
 import { useState, useEffect } from 'react';
-import { 
-  doc, getDoc, collection, query, where, getDocs, 
-  updateDoc, increment, deleteField 
-} from "firebase/firestore"; 
+import {
+  doc, getDoc, collection, query, getDocs,
+  updateDoc, increment, deleteField, serverTimestamp, writeBatch
+} from "firebase/firestore";
 import { auth, db } from '../services/firebase';
 import { calculateLevel } from '../utils/GamificationUtils';
 import TaskValidationModal from './TaskValidationModal';
-
-// Importamos la interfaz correcta
+import PlayerStatusCard from './PlayerStatusCard';
 import type { Assignment } from '../utils/ClinicalEngine';
 
-// --- HELPER NUEVO: Obtener clave del día para el objeto frequency ---
+// --- HELPERS DE FECHA ---
 const getDayKey = (date: Date): string => {
   const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   return days[date.getDay()];
 };
 
-// Helper para obtener fechas de la semana actual (Lunes a Domingo)
 const getCurrentWeekDates = () => {
   const current = new Date();
-  const day = current.getDay(); 
-  const diffToMonday = current.getDate() - day + (day === 0 ? -6 : 1);
+  const day = current.getDay();
+  // Lunes como primer día
+  const diffToMonday = current.getDate() - day + (day === 0 ? -6 : 1); 
   const monday = new Date(current.setDate(diffToMonday));
   const week = [];
   for (let i = 0; i < 7; i++) {
@@ -37,331 +36,375 @@ const DAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 interface Props { user?: any; }
 
 export default function PatientDashboard({ user }: Props) {
-  // --- ESTADOS ---
+  // --- ESTADOS DE DATOS (V2) ---
   const [patientData, setPatientData] = useState<any>(null);
-  const [missions, setMissions] = useState<Assignment[]>([]); 
-  const [routines, setRoutines] = useState<Assignment[]>([]); 
-  
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [linkedProfessionals, setLinkedProfessionals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedTask, setSelectedTask] = useState<{ task: any, type: 'mission' | 'routine', dateObj?: Date } | null>(null);
   
-  // Seguridad
+  // --- ESTADOS DE UI/LÓGICA ---
+  const [selectedTask, setSelectedTask] = useState<{ task: Assignment, dateStr: string } | null>(null);
+  const [weekDates] = useState(getCurrentWeekDates());
+
+  // --- ESTADOS DE SEGURIDAD (Restaurados de V1) ---
   const [showPin, setShowPin] = useState(false);
   const [editingPin, setEditingPin] = useState(false);
   const [newPin, setNewPin] = useState('');
 
-  const currentUser = user || auth.currentUser;
-  const currentWeekDates = getCurrentWeekDates();
-
-  // 1. CARGA DE DATOS
-  const loadData = async () => {
-    if (!currentUser) return;
-    setLoading(true);
-
-    try {
-      const docRef = doc(db, "patients", currentUser.uid);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setPatientData(docSnap.data());
-      }
-
-      // Misiones Únicas
-      const missionsQ = query(
-        collection(db, "assigned_missions"),
-        where("patientId", "==", currentUser.uid),
-        where("status", "==", "active")
-      );
-      const missionsSnap = await getDocs(missionsQ);
-      const missionsData = missionsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Assignment[];
-      setMissions(missionsData);
-
-      // Rutinas/Hábitos
-      const routinesQ = query(
-        collection(db, "assigned_routines"),
-        where("patientId", "==", currentUser.uid),
-        where("active", "==", true) // Asegúrate de que este campo exista en tus docs, o usa status: 'active'
-      );
-      const routinesSnap = await getDocs(routinesQ);
-      // CORRECCIÓN: Forzamos el tipado para evitar errores si faltan campos opcionales
-      const routinesData = routinesSnap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as Assignment[];
-      setRoutines(routinesData);
-
-    } catch (error) {
-      console.error("Error cargando dashboard:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // 1. CARGA DE DATOS (Arquitectura V2: Colección 'users')
   useEffect(() => {
-    loadData();
-  }, [currentUser]);
-
-  // 2. MANEJO DE DECISIONES
-  const handleDecision = async (decision: { type: 'success' | 'escape', payload?: any }) => {
-    if (!selectedTask || !currentUser) return;
-    
-    const { task, type, dateObj } = selectedTask;
-    const patientRef = doc(db, "patients", currentUser.uid);
-    const collectionName = type === 'mission' ? "assigned_missions" : "assigned_routines";
-    const taskRef = doc(db, collectionName, task.id);
-
-    // CORRECCIÓN: Eliminamos acceso a propiedades que no existen en la interfaz Assignment por ahora
-    // Usamos valores por defecto o 'any' si es estrictamente necesario, pero para build limpio usamos constantes
-    const xpReward = 10; // (task as any).rewards?.xp || 10;
-    const goldReward = 5; // (task as any).rewards?.gold || 5;
-
-    setSelectedTask(null);
-
-    try {
-      if (decision.type === 'success') {
-        if (type === 'mission') {
-          await updateDoc(taskRef, {
-            status: 'completed',
-            completedAt: new Date(),
-            reflection: decision.payload.reflection || '',
-            rating: decision.payload.rating
-          });
-        } else {
-          // CORRECCIÓN: Usamos completionHistory en lugar de history
-          const dateKey = dateObj!.toISOString().split('T')[0];
-          await updateDoc(taskRef, {
-            [`completionHistory.${dateKey}`]: {
-              status: 'completed',
-              completedAt: new Date(),
-              rating: decision.payload.rating,
-              reflection: decision.payload.reflection || ''
-            },
-            currentStreak: increment(1),
-            totalCompletions: increment(1)
-          });
+    if (!user) return;
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        // A. Datos del Usuario
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          setPatientData(data);
+          
+          // Cargar profesionales vinculados
+          if (data.permissions) {
+            const proIds = Object.keys(data.permissions);
+            const proPromises = proIds.map(pid => getDoc(doc(db, "users", pid)));
+            const proSnaps = await Promise.all(proPromises);
+            const pros = proSnaps.map(s => ({ id: s.id, ...s.data() }));
+            setLinkedProfessionals(pros);
+          }
         }
 
-        await updateDoc(patientRef, {
-          "gamificationProfile.currentXp": increment(xpReward),
-          "gamificationProfile.gold": increment(goldReward),
-          "gamificationProfile.missionsCompleted": increment(1)
+        // B. Assignments (Misiones/Rutinas)
+        const q = query(collection(db, "users", user.uid, "assignments"));
+        const tasksSnap = await getDocs(q);
+        const tasksList = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() } as Assignment));
+        setAssignments(tasksList);
+
+      } catch (error) {
+        console.error("Error cargando dashboard:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, [user]);
+
+  // 2. MANEJO DE TAREAS
+  const handleTaskClick = (task: Assignment, date: Date) => {
+    const dateStr = date.toISOString().split('T')[0];
+    const history = (task.completionHistory as any) || {};
+    
+    if (history[dateStr]) {
+      // Si ya tiene estado (completado O escapado), avisar
+      alert(`Esta actividad ya fue registrada como: ${history[dateStr].status}`);
+      return;
+    }
+    setSelectedTask({ task, dateStr });
+  };
+
+  // 3. LÓGICA DE DECISIÓN (Híbrido V1 + V2)
+  const handleDecision = async (decision: { type: 'success' | 'escape', payload?: any }) => {
+    if (!selectedTask || !user) return;
+
+    const { task, dateStr } = selectedTask;
+    const taskRef = doc(db, "users", user.uid, "assignments", task.id);
+    const userRef = doc(db, "users", user.uid);
+
+    try {
+      const batch = db.batch(); // Usamos Batch para atomicidad (V2)
+
+      if (decision.type === 'success') {
+        // --- CASO ÉXITO ---
+        
+        // A. Actualizar Historial
+        batch.update(taskRef, {
+          [`completionHistory.${dateStr}`]: {
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            rating: decision.payload.rating,
+            reflection: decision.payload.reflection || ''
+          },
+          lastCompletedAt: serverTimestamp(),
+          // RESTAURADO DE V1: Contadores de racha
+          currentStreak: increment(1),
+          totalCompletions: increment(1)
         });
 
+        // B. Recompensas (V2 Logic)
+        const xpReward = task.staticTaskData?.xp || 10;
+        const goldReward = task.staticTaskData?.gold || 5;
+
+        batch.update(userRef, {
+          "gamification.xp": increment(xpReward),
+          "gamification.gold": increment(goldReward),
+          "gamification.completedMissions": increment(1)
+        });
+
+        // Stats adicionales
+        if (task.staticTaskData?.stats) {
+             const statKey = `gamification.stats.${task.staticTaskData.stats}`; 
+             batch.update(userRef, { [statKey]: increment(1) });
+        }
+
       } else {
-        if (type !== 'mission') {
-           const dateKey = dateObj!.toISOString().split('T')[0];
-           // CORRECCIÓN: Usamos completionHistory
-           await updateDoc(taskRef, {
-             [`completionHistory.${dateKey}`]: {
+        // --- CASO ESCAPE (RESTAURADO DE V1) ---
+        // Ahora sí guardamos en BD que el usuario escapó
+        batch.update(taskRef, {
+             [`completionHistory.${dateStr}`]: {
                status: 'escaped',
-               escapedAt: new Date(),
+               escapedAt: new Date().toISOString(),
                motive: decision.payload.motive
              },
+             // RESTAURADO DE V1: Romper la racha
              currentStreak: 0 
-           });
-        }
+        });
       }
-      await loadData(); 
+
+      await batch.commit();
+      
+      // Actualización optimista de UI simple (para evitar recarga total si no se desea)
+      // O simplemente recargamos para asegurar sincronización:
+      window.location.reload(); 
+
     } catch (error) {
       console.error("Error guardando progreso:", error);
-      alert("Error al guardar. Intenta de nuevo.");
+      alert("Error guardando progreso");
     }
   };
 
-  // --- FUNCIONES V2 (Seguridad) ---
-  const handleRevokeAccess = async (professionalId: string, professionalName: string) => {
-    if (!currentUser) return;
-    if (!window.confirm(`¿Estás seguro de que quieres revocar el acceso a ${professionalName}?`)) return;
-
-    try {
-      const patientRef = doc(db, "patients", currentUser.uid);
-      await updateDoc(patientRef, {
-        [`careTeam.${professionalId}`]: deleteField()
-      });
-      alert(`Acceso revocado a ${professionalName}.`);
-      await loadData();
-    } catch (e) {
-      console.error("Error revocando:", e);
-      alert("Hubo un error al revocar el acceso.");
-    }
-  };
-
+  // 4. GESTIÓN DE PIN (RESTAURADO DE V1 - Adaptado a Tailwind)
   const handleUpdatePin = async () => {
-    if (!currentUser || newPin.length !== 4) return alert("El PIN debe tener 4 dígitos.");
+    if (!user || newPin.length !== 4) return alert("El PIN debe tener 4 dígitos.");
     try {
-      const patientRef = doc(db, "patients", currentUser.uid);
-      await updateDoc(patientRef, { securityPin: newPin });
+      // Nota: V2 usa 'users', V1 usaba 'patients'. Mantenemos arquitectura V2.
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, { securityPin: newPin });
+      
       setPatientData({ ...patientData, securityPin: newPin });
       setEditingPin(false);
       setNewPin('');
       alert("PIN actualizado correctamente.");
     } catch (e) {
+      console.error(e);
       alert("Error actualizando PIN.");
     }
   };
 
-  if (loading) return <div style={{padding:'20px'}}>Cargando aventura...</div>;
-  if (!patientData) return <div>No se encontró el perfil.</div>;
+  // 5. GESTIÓN DE ACCESO
+  const handleRevokeAccess = async (profId: string, profName: string) => {
+    if (!window.confirm(`¿Seguro que quieres desconectar a ${profName}?`)) return;
+    try {
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, {
+            [`permissions.${profId}`]: deleteField()
+        });
+        alert("Acceso revocado correctamente.");
+        window.location.reload();
+    } catch (e) {
+        alert("Error al revocar");
+    }
+  };
 
-  const levelInfo = calculateLevel(patientData.gamificationProfile?.currentXp || 0);
+  // --- CÁLCULOS UI ---
+  const currentXp = patientData?.gamification?.xp || 0;
+  const levelInfo = calculateLevel(currentXp);
+  const currentStats = patientData?.gamification?.stats || { STR: 0, INT: 0, STA: 0, DEX: 0 };
+
+  if (loading) return <div className="p-10 text-center text-gray-500">Cargando Nexus...</div>;
 
   return (
-    <div style={{ maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif', background: '#fcfcfc', minHeight: '100vh', paddingBottom: '40px' }}>
+    <div className="min-h-screen bg-gray-50 font-sans pb-20">
       
-      {/* HEADER */}
-      <div style={{ background: 'linear-gradient(135deg, #1565C0 0%, #42A5F5 100%)', color: 'white', padding: '20px', borderRadius: '0 0 20px 20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '22px' }}>Hola, {patientData.fullName.split(' ')[0]}</h1>
-            {/* CORRECCIÓN: Eliminado .title, solo mostramos el nivel numérico */}
-            <p style={{ margin: '5px 0 0 0', opacity: 0.9 }}>Nivel {levelInfo.level}</p>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-             <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{patientData.gamificationProfile?.currentXp} XP</div>
-             <div style={{ fontSize: '14px', color: '#FFD700' }}>🪙 {patientData.gamificationProfile?.gold || 0} Oro</div>
-          </div>
-        </div>
+      {/* HEADER (Estilo V2) */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center mb-6 sticky top-0 z-10">
+         <div>
+            <h1 className="text-xl font-bold text-gray-800">
+                Hola, {patientData?.fullName?.split(' ')[0] || 'Viajero'}
+            </h1>
+            <p className="text-xs text-gray-500">
+                {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long'})}
+            </p>
+         </div>
+         <button onClick={() => auth.signOut()} className="text-sm text-red-500 font-semibold hover:bg-red-50 px-3 py-1 rounded-lg transition-colors">
+            Salir
+         </button>
       </div>
 
-      <div style={{ padding: '20px' }}>
+      <div className="max-w-3xl mx-auto px-4">
         
-        {/* SECCIÓN 1: MISIONES ÚNICAS */}
-        {missions.length > 0 && (
-          <div style={{ marginBottom: '30px' }}>
-            <h2 style={{ color: '#333', fontSize: '18px' }}>Misiones Activas</h2>
-            {missions.map(mission => (
-              <div 
-                key={mission.id}
-                onClick={() => setSelectedTask({ task: mission, type: 'mission' })}
-                style={{ 
-                  background: 'white', padding: '15px', borderRadius: '12px', marginBottom: '10px',
-                  border: '1px solid #ddd', borderLeft: '5px solid #FF9800', cursor: 'pointer',
-                  boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
-                }}
-              >
-                <div style={{ fontWeight: 'bold' }}>{mission.staticTaskData?.title || mission.title}</div>
-                {/* CORRECCIÓN: Eliminada referencia a mission.rewards para evitar error TS */}
-                <div style={{ fontSize: '12px', color: '#666' }}>Recompensa: XP Variable</div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* STATUS CARD (Estilo V2) */}
+        <PlayerStatusCard 
+            level={levelInfo.level}
+            currentXp={levelInfo.currentLevelXp}
+            requiredXp={levelInfo.requiredXp}
+            progressPercent={levelInfo.progressPercent}
+            stats={currentStats}
+        />
 
-        {/* SECCIÓN 2: RUTINAS DIARIAS */}
-        <div>
-          <h2 style={{ color: '#333', fontSize: '18px' }}>Hábitos Diarios</h2>
-          {routines.map(routine => (
-            <div key={routine.id} style={{ marginBottom: '20px', background: 'white', borderRadius: '12px', padding: '15px', border: '1px solid #eee' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>{routine.staticTaskData?.title || routine.title}</div>
-              
-              {/* Grid de Días */}
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                {currentWeekDates.map((dateObj, idx) => {
-                   const dateKeyISO = dateObj.toISOString().split('T')[0]; // Para historial
-                   const dayKeyFreq = getDayKey(dateObj); // Para frecuencia (ej: 'mon')
-                   
-                   // Verificamos si existe en el objeto (no array includes)
-                   const isScheduled = routine.frequency && routine.frequency[dayKeyFreq] !== undefined;
-
-                   // Si no está programado para hoy, renderizamos un espacio vacío
-                   if (!isScheduled) {
-                     return (
-                        <div key={idx} style={{ width: '32px', textAlign: 'center', opacity: 0.3, fontSize: '12px' }}>
-                            -
-                        </div>
-                     );
-                   }
-
-                   // CORRECCIÓN: Usamos completionHistory en lugar de history
-                   const historyItem = (routine.completionHistory as any)?.[dateKeyISO];
-                   const isCompleted = historyItem?.status === 'completed';
-                   
-                   return (
-                     <div 
-                       key={idx} 
-                       onClick={() => {
-                         if(!historyItem) setSelectedTask({ task: routine, type: 'routine', dateObj });
-                       }}
-                       style={{ textAlign: 'center', cursor: historyItem ? 'default' : 'pointer' }}
-                     >
-                       <div style={{ 
-                         width: '32px', height: '32px', borderRadius: '50%', 
-                         background: isCompleted ? '#4CAF50' : '#f0f0f0',
-                         color: isCompleted ? 'white' : '#555',
-                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                         fontSize: '12px', fontWeight: 'bold',
-                         border: historyItem ? 'none' : '1px solid #ccc'
-                       }}>
-                         {isCompleted ? '✓' : DAY_LABELS[idx]}
-                       </div>
-                     </div>
-                   );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* SECCIÓN V2 (Seguridad) */}
-      <div style={{ margin: '20px', padding: '20px', background: 'white', borderRadius: '12px', border: '1px solid #eee', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-        <h3 style={{ borderBottom: '2px solid #eee', paddingBottom: '10px', color: '#444', marginTop: 0 }}>
-          🛡️ Seguridad y Accesos
+        {/* TABLA DE MISIONES (Estilo V2 con lógica V1 integrada) */}
+        <h3 className="text-lg font-bold text-gray-700 mb-4 mt-8 flex items-center gap-2">
+            <span>📅</span> Matriz de Tareas
         </h3>
-        <div style={{ marginBottom: '20px' }}>
-          <h4 style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>Mi PIN de Seguridad</h4>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#f9f9f9', padding: '10px', borderRadius: '8px' }}>
-            {editingPin ? (
-              <>
-                <input 
-                  type="password" maxLength={4} placeholder="Nuevo PIN"
-                  value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
-                  style={{ padding: '5px', borderRadius: '4px', border: '1px solid #ccc', width: '80px', textAlign: 'center' }}
-                />
-                <button onClick={handleUpdatePin} style={{ background: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px', padding: '5px 10px', cursor: 'pointer' }}>Guardar</button>
-                <button onClick={() => setEditingPin(false)} style={{ background: '#999', color: 'white', border: 'none', borderRadius: '4px', padding: '5px 10px', cursor: 'pointer' }}>Cancelar</button>
-              </>
-            ) : (
-              <>
-                <div style={{ fontWeight: 'bold', fontSize: '18px', letterSpacing: '2px' }}>
-                  {showPin ? (patientData.securityPin || '****') : '••••'}
-                </div>
-                <button onClick={() => setShowPin(!showPin)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#2196F3', textDecoration: 'underline' }}>{showPin ? 'Ocultar' : 'Mostrar'}</button>
-                <button onClick={() => setEditingPin(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#666', textDecoration: 'underline' }}>Cambiar</button>
-              </>
-            )}
-          </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm text-left">
+                <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200">
+                    <tr>
+                        <th className="px-4 py-3">Misión</th>
+                        {weekDates.map((d, i) => (
+                            <th key={i} className="px-2 py-3 text-center min-w-[40px]">
+                                {DAY_LABELS[i]}
+                                <div className="text-[10px] font-normal">{d.getDate()}</div>
+                            </th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                    {assignments.map(task => {
+                        const isRoutine = task.type === 'routine';
+                        const frequency = (task.frequency as any) || {};
+
+                        return (
+                            <tr key={task.id} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-4 py-3">
+                                    <div className="font-bold text-gray-800">
+                                        {task.staticTaskData?.title || task.title}
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs text-gray-400">
+                                        <span>{isRoutine ? 'Rutina' : 'Misión'}</span>
+                                        {/* Mostramos Racha si existe (Feature V1) */}
+                                        {(task as any).currentStreak > 1 && (
+                                            <span className="text-orange-500 font-bold">
+                                                🔥 {(task as any).currentStreak}
+                                            </span>
+                                        )}
+                                    </div>
+                                </td>
+                                
+                                {weekDates.map((date, i) => {
+                                    const dayKey = getDayKey(date);
+                                    // Si es rutina, checkear frecuencia. Si es misión, siempre visible hasta completar.
+                                    const isScheduled = isRoutine ? frequency[dayKey] : true;
+                                    
+                                    const dateStr = date.toISOString().split('T')[0];
+                                    const historyEntry = (task.completionHistory as any)?.[dateStr];
+                                    
+                                    const isCompleted = historyEntry?.status === 'completed';
+                                    const isEscaped = historyEntry?.status === 'escaped'; // Feature V1 logic
+
+                                    if (!isScheduled) return <td key={i} className="bg-gray-50/50"></td>;
+
+                                    return (
+                                        <td key={i} className="p-1 text-center align-middle">
+                                            <button
+                                                onClick={() => handleTaskClick(task, date)}
+                                                disabled={!!historyEntry}
+                                                className={`
+                                                    w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all shadow-sm
+                                                    ${isCompleted 
+                                                        ? 'bg-green-100 text-green-600 border border-green-200 cursor-default' 
+                                                        : isEscaped
+                                                            ? 'bg-gray-200 text-gray-500 border border-gray-300 cursor-default'
+                                                            : 'bg-white border-2 border-gray-300 text-gray-300 hover:border-purple-500 hover:text-purple-500 hover:shadow-md cursor-pointer'
+                                                    }
+                                                `}
+                                                title={isCompleted ? 'Completada' : isEscaped ? 'Saltada' : 'Realizar'}
+                                            >
+                                                {isCompleted ? '✓' : isEscaped ? '-' : ''}
+                                            </button>
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        );
+                    })}
+                    {assignments.length === 0 && (
+                        <tr>
+                            <td colSpan={8} className="p-8 text-center text-gray-400 italic">
+                                No tienes misiones activas.
+                            </td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
         </div>
 
-        <div>
-          <h4 style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>Profesionales con Acceso</h4>
-          {(!patientData.careTeam || Object.keys(patientData.careTeam).length === 0) ? (
-            <div style={{ fontSize: '13px', color: '#999', fontStyle: 'italic' }}>No has vinculado profesionales aún.</div>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {Object.entries(patientData.careTeam).map(([profId, info]: [string, any]) => (
-                <li key={profId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', paddingBottom: '10px', borderBottom: '1px dashed #eee' }}>
-                  <div>
-                    <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#333' }}>{info.professionalName}</div>
-                    <div style={{ fontSize: '11px', color: '#888' }}>{info.professionType}</div>
-                  </div>
-                  <button onClick={() => handleRevokeAccess(profId, info.professionalName)} style={{ padding: '5px 10px', fontSize: '11px', color: '#d32f2f', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: '4px', cursor: 'pointer' }}>Revocar</button>
-                </li>
-              ))}
-            </ul>
-          )}
+        {/* --- SECCIÓN SEGURIDAD (Restaurada de V1 con estilo Tailwind) --- */}
+        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h3 className="text-lg font-bold text-gray-700 border-b pb-2 mb-4">
+                🛡️ Seguridad y Accesos
+            </h3>
+
+            {/* Gestión de PIN */}
+            <div className="mb-6">
+                <h4 className="text-sm font-semibold text-gray-500 mb-2">Mi PIN de Seguridad</h4>
+                <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                    {editingPin ? (
+                        <>
+                            <input 
+                                type="password" maxLength={4} placeholder="PIN"
+                                value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                                className="w-20 text-center p-1 border rounded focus:ring-2 focus:ring-purple-200 outline-none"
+                            />
+                            <button onClick={handleUpdatePin} className="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600">
+                                Guardar
+                            </button>
+                            <button onClick={() => setEditingPin(false)} className="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm hover:bg-gray-400">
+                                Cancelar
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <div className="font-mono text-xl tracking-widest text-gray-800">
+                                {showPin ? (patientData?.securityPin || 'Sin PIN') : '••••'}
+                            </div>
+                            <button onClick={() => setShowPin(!showPin)} className="text-sm text-blue-500 hover:underline">
+                                {showPin ? 'Ocultar' : 'Mostrar'}
+                            </button>
+                            <button onClick={() => setEditingPin(true)} className="text-sm text-gray-500 hover:text-gray-700 underline">
+                                Cambiar
+                            </button>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* Lista de Profesionales */}
+            <div>
+                <h4 className="text-sm font-semibold text-gray-500 mb-3">Equipo de Salud Vinculado</h4>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    {linkedProfessionals.map((prof) => (
+                        <div key={prof.id} className="flex justify-between items-center p-3 bg-white rounded border border-gray-200">
+                            <div>
+                                <p className="font-bold text-gray-700 text-sm">{prof.fullName || 'Profesional'}</p>
+                                <p className="text-xs text-purple-600">Terapeuta</p>
+                            </div>
+                            <button 
+                                onClick={() => handleRevokeAccess(prof.id, prof.fullName)}
+                                className="text-xs text-red-500 bg-red-50 hover:bg-red-100 px-2 py-1 rounded border border-red-100 transition-colors"
+                            >
+                                Desvincular
+                            </button>
+                        </div>
+                    ))}
+                    {linkedProfessionals.length === 0 && (
+                        <p className="text-sm text-gray-400 italic">No hay profesionales vinculados.</p>
+                    )}
+                </div>
+            </div>
         </div>
+
       </div>
 
-      <TaskValidationModal 
+      {/* MODAL (Sin cambios, funcional) */}
+      <TaskValidationModal
         isOpen={!!selectedTask}
         taskTitle={selectedTask?.task?.staticTaskData?.title || selectedTask?.task?.title || "Misión"}
         onClose={() => setSelectedTask(null)}
         onConfirmSuccess={(rating, reflection) => handleDecision({ type: 'success', payload: { rating, reflection } })}
         onConfirmEscape={(reasonId) => handleDecision({ type: 'escape', payload: { motive: reasonId } })}
       />
-
-      <div style={{ marginTop: '30px', textAlign: 'center' }}>
-        <button onClick={() => auth.signOut()} style={{ color: '#d32f2f', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-          Cerrar Sesión
-        </button>
-      </div>
 
     </div>
   );
