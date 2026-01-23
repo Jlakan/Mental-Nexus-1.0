@@ -1,5 +1,5 @@
 // src/components/PlayerStatusCard.tsx
-import React from 'react';
+
 
 // Iconos simples para las estadísticas
 const STAT_ICONS: any = {
