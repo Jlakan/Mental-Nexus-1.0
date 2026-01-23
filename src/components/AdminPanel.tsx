@@ -12,7 +12,7 @@ import GameEconomyPanel from './GameEconomyPanel';
 import AdminBulkTools from './AdminBulkTools';
 
 // Tipos
-import { Assignment } from '../types'; // Asegúrate de que esta ruta apunte a tu definición de Assignment
+import type { Assignment } from '../types'; // Asegúrate de que esta ruta apunte a tu definición de Assignment
 
 // Importaciones de Inteligencia
 import { analyzeCatalogBatch } from '../utils/ClinicalEngine';
@@ -90,7 +90,7 @@ export default function AdminPanel() {
         ];
 
         // Análisis de contenido (Un solo argumento)
-        const contentStats = analyzeCatalogBatch(allTasks); 
+        const contentStats = analyzeCatalogBatch(allTasks as any[]); 
         
         let statsArray = Array.isArray(contentStats) ? contentStats : Object.values(contentStats);
         // Orden por defecto: Popularidad

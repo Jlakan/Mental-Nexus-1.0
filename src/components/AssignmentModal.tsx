@@ -78,7 +78,7 @@ export default function AssignmentModal({
         // MODO EDICIÓN
         setTitle(taskToEdit.title || '');
         // CORRECCIÓN: Usar customInstructions en lugar de description
-        setDesc(taskToEdit.customInstructions || '');
+        setDesc((taskToEdit as any)?.customInstructions || '');
         
         const type = taskToEdit.type === 'routine' ? 'daily' : 'one-off';
         setMissionType(type);

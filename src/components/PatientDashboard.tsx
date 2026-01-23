@@ -269,7 +269,7 @@ export default function PatientDashboard({ user }: Props) {
                    }
 
                    // CORRECCIÓN: Usamos completionHistory en lugar de history
-                   const historyItem = routine.completionHistory?.[dateKeyISO];
+                   const historyItem = (routine.completionHistory as any)?.[dateKeyISO];
                    const isCompleted = historyItem?.status === 'completed';
                    
                    return (

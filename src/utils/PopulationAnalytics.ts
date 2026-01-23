@@ -1,4 +1,4 @@
-import { Assignment } from '../types';
+import type { Assignment } from '../types';
 import { analyzeAssignment } from './ClinicalEngine';
 
 // ============================================================================
@@ -132,7 +132,7 @@ export const calculateAggregatedStats = (
     // Nota: Si analyzeAssignment falla o no existe, usamos un objeto default seguro.
     let analysis;
     try {
-        analysis = analyzeAssignment(task);
+        analysis = analyzeAssignment(task as any);
     } catch (e) {
         analysis = { adjustedScore: 0 }; // Fallback seguro
     }
