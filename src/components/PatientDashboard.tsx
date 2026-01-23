@@ -1,9 +1,9 @@
 // src/components/PatientDashboard.tsx
 import { useState, useEffect } from 'react';
 import {
-  doc, getDoc, collection, query, where, getDocs,
+  doc, getDoc, collection, query, getDocs, // <--- FIX: Se eliminó 'where'
   updateDoc, increment, deleteField, serverTimestamp,
-  writeBatch // <--- 1. AGREGADO: Importamos writeBatch
+  writeBatch
 } from "firebase/firestore";
 import { auth, db } from '../services/firebase';
 import { calculateLevel } from '../utils/GamificationUtils';
@@ -93,8 +93,10 @@ export default function PatientDashboard({ user }: Props) {
     const taskRef = doc(db, "users", user.uid, "assignments", task.id);
     const userRef = doc(db, "users", user.uid);
 
+    // FIX: Creamos una referencia tipada como 'any' para acceder a xp/gold/stats sin errores de TS
+    const taskDataAny = task.staticTaskData as any;
+
     try {
-      // 2. CORREGIDO: Usamos writeBatch(db) en lugar de db.batch()
       const batch = writeBatch(db); 
 
       if (decision.type === 'success') {
@@ -108,8 +110,9 @@ export default function PatientDashboard({ user }: Props) {
           lastCompletedAt: serverTimestamp()
         });
 
-        const xpReward = task.staticTaskData?.xp || 10;
-        const goldReward = task.staticTaskData?.gold || 5;
+        // FIX: Usamos la variable auxiliar taskDataAny para evitar error TS2339
+        const xpReward = taskDataAny?.xp || 10;
+        const goldReward = taskDataAny?.gold || 5;
 
         batch.update(userRef, {
           "gamification.xp": increment(xpReward),
@@ -117,8 +120,9 @@ export default function PatientDashboard({ user }: Props) {
           "gamification.completedMissions": increment(1)
         });
 
-        if (task.staticTaskData?.stats) {
-             const statKey = `gamification.stats.${task.staticTaskData.stats}`; 
+        // FIX: Verificación con casting a any
+        if (taskDataAny?.stats) {
+             const statKey = `gamification.stats.${taskDataAny.stats}`; 
              batch.update(userRef, { [statKey]: increment(1) });
         }
 
@@ -132,7 +136,8 @@ export default function PatientDashboard({ user }: Props) {
         ...prev,
         gamification: {
             ...prev?.gamification,
-            xp: (prev?.gamification?.xp || 0) + (decision.type === 'success' ? (task.staticTaskData?.xp || 10) : 0)
+            // FIX: Casting a any también aquí para la actualización optimista
+            xp: (prev?.gamification?.xp || 0) + (decision.type === 'success' ? ((task.staticTaskData as any)?.xp || 10) : 0)
         }
       }));
 
@@ -215,11 +220,14 @@ export default function PatientDashboard({ user }: Props) {
                         const isRoutine = task.type === 'routine';
                         const frequency = (task.frequency as any) || {};
 
+                        // FIX: Añadido casting para acceder al título de forma segura si difiere del tipo base
+                        const title = (task.staticTaskData as any)?.title || task.staticTaskData?.title || task.title;
+
                         return (
                             <tr key={task.id} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-4 py-3">
                                     <div className="font-bold text-gray-800">
-                                        {task.staticTaskData?.title || task.title}
+                                        {title}
                                     </div>
                                     <div className="text-xs text-gray-400 truncate max-w-[150px]">
                                         {isRoutine ? 'Rutina Diaria' : 'Misión Única'}
@@ -299,7 +307,8 @@ export default function PatientDashboard({ user }: Props) {
 
       <TaskValidationModal
         isOpen={!!selectedTask}
-        taskTitle={selectedTask?.task?.staticTaskData?.title || selectedTask?.task?.title || "Misión"}
+        // FIX: Casting para evitar errores si staticTaskData no tiene las propiedades esperadas
+        taskTitle={(selectedTask?.task?.staticTaskData as any)?.title || selectedTask?.task?.title || "Misión"}
         onClose={() => setSelectedTask(null)}
         onConfirmSuccess={(rating, reflection) => handleDecision({ type: 'success', payload: { rating, reflection } })}
         onConfirmEscape={(reasonId) => handleDecision({ type: 'escape', payload: { motive: reasonId } })}
