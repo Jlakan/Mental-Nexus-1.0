@@ -2,10 +2,103 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  body {
+    /* CAMBIO: Usamos el código de color directo para evitar el error de carga */
+    background-color: #0B1121; 
+    color: #E2E8F0;
+    
+    /* Propiedades extra */
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-image: radial-gradient(circle at 50% 0%, rgba(0, 229, 255, 0.08), transparent 70%);
+    min-height: 100vh;
+  }
 
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight text-white;
+  }
 
+  h1 {
+    font-size: 2.25rem;
+    line-height: 2.5rem;
+    filter: drop-shadow(0 0 8px rgba(0,229,255,0.3));
+  }
+}
 
-/* Estilos base para modo oscuro por defecto */
-body {
-@apply bg-slate-950 text-slate-100;
+@layer components {
+  /* --- TARJETAS --- */
+  .nexus-card {
+    /* Aquí usamos background-color con opacidad manual para evitar errores */
+    background-color: rgba(21, 30, 50, 0.9); 
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(51, 65, 85, 0.5);
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    transition: all 0.3s;
+  }
+  
+  .nexus-card:hover {
+    border-color: rgba(0, 229, 255, 0.4);
+    box-shadow: 0 0 15px rgba(0, 229, 255, 0.15);
+  }
+
+  /* --- BOTONES --- */
+  .btn-primary {
+    background: linear-gradient(to right, #0891b2, #00E5FF);
+    color: #0B1121;
+    font-weight: 700;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.875rem;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  .btn-primary:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 15px rgba(0, 229, 255, 0.4);
+  }
+
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    color: #00E5FF;
+    font-weight: 700;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-secondary:hover {
+    background-color: rgba(0, 229, 255, 0.1);
+    border-color: #00E5FF;
+    color: white;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
+  }
+
+  /* --- INPUTS --- */
+  .nexus-input {
+    background-color: rgba(15, 23, 42, 0.6);
+    border: 1px solid #334155;
+    color: white;
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    width: 100%;
+    outline: none;
+    transition: all 0.2s;
+  }
+  
+  .nexus-input:focus {
+    border-color: #00E5FF;
+    box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.2);
+  }
 }

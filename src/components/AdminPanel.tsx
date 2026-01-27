@@ -324,13 +324,21 @@ export default function AdminPanel() {
          </table>
       )}
 
-      {activeTab === 'users' && (
-        <div style={{background:'white', borderRadius:'8px', overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
-            <table style={{width:'100%', borderCollapse:'collapse'}}>
-            <thead><tr style={{background:'#f5f5f5', textAlign:'left'}}>
-                <th style={{padding:'12px'}}>Usuario</th><th style={{padding:'12px'}}>Rol</th><th style={{padding:'12px'}}>Acciones</th>
-            </tr></thead>
-            <tbody>
+{activeTab === 'users' && (
+    <div style={{background:'white', borderRadius:'8px', overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
+        <table style={{width:'100%', borderCollapse:'collapse'}}>
+        <thead>
+            <tr style={{
+                background:'#f5f5f5', 
+                textAlign:'left', 
+                color: '#0D47A1' 
+            }}>
+                <th style={{padding:'12px'}}>Usuario</th>
+                <th style={{padding:'12px'}}>Rol</th>
+                <th style={{padding:'12px'}}>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
             {usersList.map(u => (
                 <tr key={u.uid} style={{borderBottom:'1px solid #eee'}}>
                 <td style={{padding:'12px'}}><strong>{u.displayName}</strong><br/><small style={{color:'#666'}}>{u.email}</small></td>

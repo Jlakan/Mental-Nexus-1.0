@@ -96,7 +96,8 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) =
         <div style={{
             background:'white', borderRadius:'12px', padding:'0', 
             boxShadow:'0 2px 8px rgba(0,0,0,0.05)', marginBottom:'20px', 
-            display:'flex', overflow:'hidden', minHeight:'160px'
+            display:'flex', overflow:'hidden', minHeight:'160px',
+            color: '#333' /* FIX: Forzar color oscuro dentro de este componente */
         }}>
             
             {/* 1. IZQUIERDA: ADHERENCIA + CARGA COGNITIVA */}
@@ -168,7 +169,7 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) =
                         if (e.key === 'Enter') { onAddTag(newTag); setNewTag(''); }
                     }}
                     placeholder="+ Agregar observación (ej. 'ansiedad')..." 
-                    style={{border:'none', flex:1, fontSize:'12px', outline:'none', padding:'6px'}}
+                    style={{border:'none', flex:1, fontSize:'12px', outline:'none', padding:'6px', color:'#333'}}
                   />
                   <button 
                     onClick={() => { onAddTag(newTag); setNewTag(''); }}
@@ -198,7 +199,6 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [assistants, setAssistants] = useState<any[]>([]);
   const [activePatients, setActivePatients] = useState<any[]>([]);
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
-  // LIMPIEZA: Se eliminó 'loading' ya que no se usaba en el render.
   const [profData, setProfData] = useState<any>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -213,7 +213,6 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [patientToApprove, setPatientToApprove] = useState<any>(null);
   const [manualCandidates, setManualCandidates] = useState<any[]>([]);
   const [manualIdToMerge, setManualIdToMerge] = useState<string>('');
-  // LIMPIEZA: Se eliminó 'processingMerge' ya que no se usaba en el render.
 
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState<any>(null);
@@ -253,7 +252,6 @@ export default function ProfessionalDashboard({ user }: Props) {
   };
 
   const loadData = async () => {
-    // setLoading(true); // Eliminado
     try {
       const profRef = doc(db, "professionals", user.uid);
       const profSnap = await getDoc(profRef);
@@ -292,7 +290,6 @@ export default function ProfessionalDashboard({ user }: Props) {
         }
       }
     } catch (e) { console.error(e); } 
-    // finally { setLoading(false); } // Eliminado
   };
 
   const handleGenerateAnalytics = async () => {
@@ -319,7 +316,6 @@ export default function ProfessionalDashboard({ user }: Props) {
 
   const handleExecuteMerge = async (shouldMerge: boolean) => {
     if (!patientToApprove) return;
-    // setProcessingMerge(true); // Eliminado
     try {
       const batch = writeBatch(db);
       const patRef = doc(db, "patients", patientToApprove.id);
@@ -348,7 +344,6 @@ export default function ProfessionalDashboard({ user }: Props) {
       batch.update(patRef, {isAuthorized:true, [`careTeam.${teamKey}.active`]:true, [`careTeam.${teamKey}.status`]:'active', [`careTeam.${teamKey}.joinedAt`]:new Date().toISOString()});
       await batch.commit(); alert("✅ Listo"); setIsMergeModalOpen(false); loadData();
     } catch(e:any){ console.error(e); alert(e.message); } 
-    // finally { setProcessingMerge(false); } // Eliminado
   };
 
   const hasValidAttendance = (patient: any) => {
@@ -392,17 +387,12 @@ export default function ProfessionalDashboard({ user }: Props) {
      loadPatientTasks(selectedPatient.id);
   };
 
-  // --- LOGICA TAGS INTEGRADA CON NORMALIZACIÓN ---
   const handleAddIndicator = async (text: string) => {
     if (!text.trim() || !selectedPatient) return;
-    
-    // Aplicamos la normalización antes de guardar
     const cleanTag = normalizeTag(text);
-
     try {
       await updateDoc(doc(db, "patients", selectedPatient.id), { [`clinicalIndicators.${user.uid}`]: arrayUnion(cleanTag) });
       const current = selectedPatient.clinicalIndicators?.[user.uid] || [];
-      // Evitar duplicados visuales si el tag normalizado ya existe
       if (!current.includes(cleanTag)) {
           setSelectedPatient({ ...selectedPatient, clinicalIndicators: { ...(selectedPatient.clinicalIndicators||{}), [user.uid]: [...current, cleanTag] } });
       }
@@ -419,10 +409,11 @@ export default function ProfessionalDashboard({ user }: Props) {
 
   const filteredPatients = activePatients.filter(p => p.fullName.toLowerCase().includes(searchTerm.toLowerCase()));
 
+  // FIX PRINCIPAL: Agregado color: '#1e293b' para asegurar texto oscuro en modo claro
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'sans-serif', background: '#F4F6F8' }}>
       <DashboardMenu activeView={view} onNavigate={setView} onLogout={() => auth.signOut()} />
-      <div style={{ flex: 1, padding: '30px', maxWidth: '1200px', margin: '0 auto', overflowY: 'auto' }}>
+      <div style={{ flex: 1, padding: '30px', maxWidth: '1200px', margin: '0 auto', overflowY: 'auto', color: '#1e293b' }}>
         
         {/* HEADER */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom:'1px solid #E0E0E0', paddingBottom:'20px' }}>
@@ -446,12 +437,12 @@ export default function ProfessionalDashboard({ user }: Props) {
         {view === 'agenda' ? <AgendaView userRole="professional" currentUserId={user.uid} onBack={() => setView('dashboard')} /> :
          view === 'patients_manage' ? (
            <div>
-             {pendingPatients.map(p=><div key={p.id} style={{background:'#FFF3E0', padding:'15px', marginBottom:'10px', borderRadius:'8px', display:'flex', justifyContent:'space-between'}}><div>{p.fullName}</div><button onClick={()=>handleOpenApproveModal(p)}>Revisar</button></div>)}
-             <div style={{display:'flex', justifyContent:'space-between', marginBottom:'15px'}}><h3 style={{margin:0}}>Activos ({activePatients.length})</h3><input placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} style={{padding:'8px'}}/></div>
+             {pendingPatients.map(p=><div key={p.id} style={{background:'#FFF3E0', padding:'15px', marginBottom:'10px', borderRadius:'8px', display:'flex', justifyContent:'space-between', color: '#333'}}><div>{p.fullName}</div><button onClick={()=>handleOpenApproveModal(p)}>Revisar</button></div>)}
+             <div style={{display:'flex', justifyContent:'space-between', marginBottom:'15px'}}><h3 style={{margin:0}}>Activos ({activePatients.length})</h3><input placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} style={{padding:'8px', color: '#333'}}/></div>
              <div style={{background:'white', borderRadius:'8px', overflow:'hidden'}}>
                {filteredPatients.map(p=>(
                  <div key={p.id} style={{padding:'15px', borderBottom:'1px solid #eee', display:'flex', justifyContent:'space-between'}}>
-                    <div><strong>{p.fullName}</strong><div style={{fontSize:'12px', color:'#666'}}>{p.email}</div></div>
+                    <div><strong style={{color:'#333'}}>{p.fullName}</strong><div style={{fontSize:'12px', color:'#666'}}>{p.email}</div></div>
                     <button onClick={()=>handleOpenPatient(p)} style={{padding:'5px 15px', borderRadius:'15px', border:'none', background:'#E3F2FD', color:'#1565C0', cursor:'pointer'}}>Expediente</button>
                  </div>
                ))}
@@ -459,20 +450,20 @@ export default function ProfessionalDashboard({ user }: Props) {
            </div>
          ) : view === 'dashboard' ? (
             <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:'20px', textAlign:'center'}}>
-               <div style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #2196F3'}}><h1>{activePatients.length}</h1>Pacientes</div>
-               <div style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #00BCD4'}}><h1>{profData?.nexusBalance||0}</h1>Nexus</div>
-               <div onClick={()=>setView('analytics')} style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #673AB7', cursor:'pointer'}}><h1>📊</h1>Analítica</div>
+               <div style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #2196F3', color: '#333'}}><h1>{activePatients.length}</h1>Pacientes</div>
+               <div style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #00BCD4', color: '#333'}}><h1>{profData?.nexusBalance||0}</h1>Nexus</div>
+               <div onClick={()=>setView('analytics')} style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #673AB7', cursor:'pointer', color: '#333'}}><h1>📊</h1>Analítica</div>
             </div>
          ) : view === 'analytics' ? (
-             <div>
+             <div style={{color: '#333'}}>
                 {!analyticsLoaded && <button onClick={handleGenerateAnalytics} style={{padding:'15px', background:'#673AB7', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', width:'100%'}}>Generar Reporte Global</button>}
                 {loadingAnalytics && <p>Cargando...</p>}
                 {analyticsLoaded && (
-                   <div style={{background:'white', padding:'20px', borderRadius:'10px'}}>
+                   <div style={{background:'white', padding:'20px', borderRadius:'10px', color: '#333'}}>
                       <h3>Top Rendimiento</h3>
                       {topPerformer && <div style={{color:'#4CAF50'}}>🌟 {topPerformer.title} ({topPerformer.globalSuccessRate.toFixed(0)}% éxito)</div>}
                       {mostAbandoned && <div style={{color:'#F44336'}}>⚠️ {mostAbandoned.title} ({mostAbandoned.dropoutRate.toFixed(0)}% abandono)</div>}
-                      <table style={{width:'100%', marginTop:'15px'}}>
+                      <table style={{width:'100%', marginTop:'15px', color: '#333'}}>
                          <thead><tr><th align="left">Tarea</th><th>Uso</th><th>Éxito</th></tr></thead>
                          <tbody>{interventionStats.map((s,i)=><tr key={i}><td>{s.title}</td><td align="center">{s.usageCount}</td><td align="center">{s.globalSuccessRate.toFixed(0)}%</td></tr>)}</tbody>
                       </table>
@@ -561,10 +552,10 @@ export default function ProfessionalDashboard({ user }: Props) {
 
       {isMergeModalOpen && patientToApprove && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
-           <div style={{ background: 'white', padding: '30px', borderRadius: '12px', width: '400px' }}>
+           <div style={{ background: 'white', padding: '30px', borderRadius: '12px', width: '400px', color: '#333' }}>
               <h3>Fusión de Expediente</h3>
               <p>¿Fusionar a <b>{patientToApprove.fullName}</b> con un manual?</p>
-              <select value={manualIdToMerge} onChange={e=>setManualIdToMerge(e.target.value)} style={{width:'100%', marginBottom:'10px', padding:'8px'}}>
+              <select value={manualIdToMerge} onChange={e=>setManualIdToMerge(e.target.value)} style={{width:'100%', marginBottom:'10px', padding:'8px', color:'#333'}}>
                  <option value="">No, crear nuevo</option>
                  {manualCandidates.map(c=><option key={c.id} value={c.id}>{c.fullName} (Manual)</option>)}
               </select>
