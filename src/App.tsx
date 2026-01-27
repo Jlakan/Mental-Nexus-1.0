@@ -1,16 +1,12 @@
 // src/App.tsx
 import { useState, useEffect } from 'react';
 
-// --- FIREBASE IMPORTS ---
+// --- FIREBASE IMPORTS (LIMPIOS) ---
 import { onAuthStateChanged } from 'firebase/auth';
 import { 
   doc, 
   getDoc, 
-  setDoc, 
-  collection, 
-  query, 
-  where, 
-  getDocs 
+  setDoc
 } from 'firebase/firestore';
 import { auth, db } from './services/firebase';
 
@@ -69,12 +65,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Lógica de recuperación de datos (Robustez V1)
   const fetchUserRole = async (uid: string) => {
     try {
       setLoading(true);
 
-      // 1. Buscar usuario base
       const userRef = doc(db, "users", uid);
       const userSnap = await getDoc(userRef);
       
@@ -82,17 +76,12 @@ export default function App() {
         const baseData = userSnap.data();
         let finalData = { ...baseData };
 
-        // 2. Buscar datos extendidos según el rol
         if (baseData.role === 'patient') {
           const patientRef = doc(db, "patients", uid);
           const patientSnap = await getDoc(patientRef);
           
           if (patientSnap.exists()) {
-            finalData = { 
-              ...finalData, 
-              ...patientSnap.data(),
-              profileCompleted: true 
-            };
+            finalData = { ...finalData, ...patientSnap.data(), profileCompleted: true };
           } else {
             finalData.profileCompleted = false;
           }
@@ -100,16 +89,10 @@ export default function App() {
         else if (baseData.role === 'professional') {
            const proRef = doc(db, "professionals", uid);
            const proSnap = await getDoc(proRef);
-           
            if (proSnap.exists()) {
-              finalData = { 
-                ...finalData, 
-                ...proSnap.data(),
-                isRegisteredPro: true 
-              };
+              finalData = { ...finalData, ...proSnap.data(), isRegisteredPro: true };
            }
         }
-        // Nota: Asistente carga sus datos dinámicamente en su propio componente
 
         setUserData(finalData);
       } else {
@@ -124,28 +107,20 @@ export default function App() {
   };
 
   // ---------------------------------------------------------------------------
-  // 3. HANDLERS (Manejadores de Eventos)
+  // 3. HANDLERS
   // ---------------------------------------------------------------------------
-  
-  // Asistente selecciona un doctor de su lista
   const handleSelectDoctor = (doctorId: string) => {
     setSelectedDoctorId(doctorId);
     localStorage.setItem('nexus_assistant_selected_doc', doctorId);
   };
 
-  // Asistente sale de la agenda para volver a la lista
   const handleClearDoctor = () => {
-    // Si estamos simulando, limpiamos la simulación para volver al "Lobby real" si se desea,
-    // o simplemente deseleccionamos el doctor.
     setSelectedDoctorId(null);
     localStorage.removeItem('nexus_assistant_selected_doc');
-    
-    // Opcional: Si quieres que el botón "Atrás" también apague el modo dios, descomenta esto:
-    // if (simulatedRole) setSimulatedRole(null);
   };
 
   // ---------------------------------------------------------------------------
-  // 4. PANTALLAS PREVIAS (Loading / Login / Selección)
+  // 4. PANTALLAS PREVIAS
   // ---------------------------------------------------------------------------
 
   if (loading) {
@@ -161,7 +136,6 @@ export default function App() {
     return <Login />;
   }
 
-  // Selección de Rol Inicial (Si es usuario nuevo y no estamos probando roles)
   if ((!userData || !userData.role) && !simulatedRole) {
     return (
       <RoleSelection 
@@ -185,18 +159,17 @@ export default function App() {
   }
 
   // ---------------------------------------------------------------------------
-  // 5. RENDERIZADO PRINCIPAL POR ROL
+  // 5. RENDERIZADO PRINCIPAL
   // ---------------------------------------------------------------------------
 
   const activeRole = simulatedRole || userData?.role;
-  const isRealAdmin = userData?.role === 'admin'; // Para lógica interna si se requiere
 
   // --- VISTA: ADMIN ---
   if (activeRole === 'admin') {
     return (
       <div className="relative min-h-screen">
-        {/* Botón Flotante: Alternar Vista Admin/Doctor (ABAJO DERECHA) */}
-        <div className="fixed bottom-6 right-6 z-50">
+        {/* BOTÓN ADMIN */}
+        <div className="fixed bottom-6 right-20 z-40">
            <button 
              onClick={() => setAdminViewMode(prev => prev === 'admin' ? 'professional' : 'admin')}
              className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-xl flex items-center justify-center text-2xl border-2 border-white transition-transform hover:scale-110"
@@ -212,7 +185,7 @@ export default function App() {
            (userData?.professionalCode || simulatedRole) ? <ProfessionalDashboard user={user} /> : <ProfessionalRegister />
         )}
         
-        <DevRoleSwitcher currentRole={activeRole} onSwitch={setSimulatedRole} />
+        <DevRoleSwitcher onSwitch={setSimulatedRole} />
       </div>
     );
   }
@@ -223,7 +196,7 @@ export default function App() {
     return (
       <>
         {canEnterDashboard ? <ProfessionalDashboard user={user} /> : <ProfessionalRegister />}
-        <DevRoleSwitcher currentRole={activeRole} onSwitch={setSimulatedRole} />
+        <DevRoleSwitcher onSwitch={setSimulatedRole} />
       </>
     );
   }
@@ -234,17 +207,13 @@ export default function App() {
     return (
       <>
         {canEnterDashboard ? <PatientDashboard user={user} /> : <PatientRegister />}
-        <DevRoleSwitcher currentRole={activeRole} onSwitch={setSimulatedRole} />
+        <DevRoleSwitcher onSwitch={setSimulatedRole} />
       </>
     );
   }
 
   // --- VISTA: ASISTENTE ---
   if (activeRole === 'assistant') {
-    // CORRECCIÓN CRÍTICA:
-    // Solo mostramos la Agenda si hay un doctor explícitamente seleccionado.
-    // Quitamos la condición `|| (simulatedRole && user)` para permitir
-    // ver el AssistantPanel y probar la vinculación manual en modo Dios.
     const showAgenda = selectedDoctorId; 
 
     return (
@@ -256,11 +225,10 @@ export default function App() {
               onBack={handleClearDoctor}
             />
          ) : (
-            // Ahora siempre verás esto primero, incluso en simulación
             <AssistantPanel onSelectProfessional={handleSelectDoctor} />
          )}
 
-         <DevRoleSwitcher currentRole={activeRole} onSwitch={setSimulatedRole} />
+         <DevRoleSwitcher onSwitch={setSimulatedRole} />
       </div>
     );
   }
@@ -288,16 +256,16 @@ export default function App() {
         Cerrar Sesión
       </button>
       
-      <DevRoleSwitcher currentRole={activeRole} onSwitch={setSimulatedRole} />
+      <DevRoleSwitcher onSwitch={setSimulatedRole} />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// COMPONENTE: DEV ROLE SWITCHER (ABAJO IZQUIERDA)
+// COMPONENTE: DEV ROLE SWITCHER
 // ---------------------------------------------------------------------------
-function DevRoleSwitcher({ currentRole, onSwitch }: { currentRole: string, onSwitch: (r: string | null) => void }) {
-  // Sin restricción de Admin para facilitar el desarrollo
+function DevRoleSwitcher({ onSwitch }: { onSwitch: (r: string | null) => void }) {
+  // Posición: Bottom-4 Right-4
   return (
     <div className="fixed bottom-4 right-4 z-[9999] group">
       <div className="bg-slate-900/90 border border-cyan-500/30 p-2 rounded-lg backdrop-blur-md shadow-2xl opacity-60 hover:opacity-100 transition-all">
