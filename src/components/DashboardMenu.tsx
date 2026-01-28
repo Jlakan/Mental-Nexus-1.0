@@ -1,5 +1,4 @@
 // src/components/DashboardMenu.tsx
-import React from 'react';
 
 interface Props {
   activeView: string;
