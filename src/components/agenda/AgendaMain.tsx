@@ -94,6 +94,10 @@ const getDateFromSlotKey = (slotKey: string, year: number, month: number): Date 
 };
 
 export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
+  // --- RESPONSIVE STATE ---
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+
   // --- CONTEXTO ---
   const [myProfessionals, setMyProfessionals] = useState<any[]>([]);
   const [selectedProfId, setSelectedProfId] = useState<string>('');
@@ -165,6 +169,17 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
 
   const [savePricePreference, setSavePricePreference] = useState(false);
   const [selectedPatientNoShows, setSelectedPatientNoShows] = useState<number>(0);
+
+  // --- DETECTOR DE MÓVIL (HOOK) ---
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) setShowMobileSidebar(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     if(isNewEventModalOpen && !editingEventId) {
@@ -241,6 +256,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
       setActiveSidePanel('none');
       setIsPausedSidebarOpen(true);
       fetchPausedPatients();
+      if (isMobile) setShowMobileSidebar(true); // Ensure menu is visible on mobile
   };
 
   const handleReactivatePatient = async (patientId: string, patientName: string) => {
@@ -473,9 +489,8 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
   };
 
   const handleResolveConflictToWaitlist = async (conflict: ConflictItem) => {
-    // ... (Mantener lógica original para ahorrar espacio, es idéntica a AgendaView)
     if(!window.confirm(`¿Mover a ${conflict.slotData.patientName} a lista de espera?`)) return;
-    try { /* ... Lógica Batch ... */ alert("Movido a espera"); setConflictList(prev => prev.filter(c => c.slotKey !== conflict.slotKey)); } catch(e) { console.error(e); }
+    try { alert("Movido a espera (Simulado)"); setConflictList(prev => prev.filter(c => c.slotKey !== conflict.slotKey)); } catch(e) { console.error(e); }
   };
 
   const handleKeepConflict = (conflict: ConflictItem) => {
@@ -739,6 +754,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
     setFormData({ patientId: p.id, patientName: p.fullName, patientExternalPhone: p.contactNumber || '', patientExternalEmail: p.email || '', price: price, adminNotes: '', paymentStatus: 'pending', paymentMethod: 'cash' });
     setSelectedPatientNoShows(ns);
     alert(`Has seleccionado a ${p.fullName}. Click en un espacio disponible.`);
+    if (isMobile) setShowMobileSidebar(false); // Close menu on mobile after selection
   };
 
   const DateSelectorRow = ({ label, dateValue, onChange }: { label: string, dateValue: dayjs.Dayjs, onChange: (d: dayjs.Dayjs) => void }) => {
@@ -803,50 +819,94 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
   if (loading && !currentMonthData && !isMonthInitialized) return <div style={{padding:'50px', textAlign:'center'}}>Cargando...</div>;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', fontFamily: 'sans-serif', background:'#f5f5f5', overflow:'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', fontFamily: 'sans-serif', background:'#f5f5f5', overflow:'hidden', position: 'relative' }}>
 
-      {/* --- SIDEBAR COMPONETIZADO --- */}
-      <AgendaSidebar
-        onBack={onBack}
-        onOpenConfig={() => setIsConfigOpen(true)}
-        onOpenEvents={() => setIsEventsManagerOpen(true)}
-        isMonthInitialized={isMonthInitialized}
-        onRegenerate={handleRegenerateMonth}
-        onInitialize={handleInitializeMonth}
-        activeSidePanel={activeSidePanel}
-        setActiveSidePanel={setActiveSidePanel}
-        isPausedSidebarOpen={isPausedSidebarOpen}
-        setIsPausedSidebarOpen={setIsPausedSidebarOpen}
-        patientsNeedingAppt={patientsNeedingAppt}
-        waitlist={waitlist}
-        pausedList={pausedList}
-        onOpenPausedSidebar={handleOpenPausedSidebar}
-        onScheduleNeeding={handleScheduleNeedingPatient}
-        onArchivePatient={handleArchivePatient}
-        onAddWaitlist={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true); }}
-        onDeleteWaitlist={handleDeleteWaitlistItem}
-        onReactivatePatient={handleReactivatePatient}
-      />
+      {/* --- SIDEBAR COMPONETIZADO (MÓVIL FRIENDLY) --- */}
+      <div style={{
+          position: isMobile ? 'absolute' : 'relative',
+          zIndex: 99,
+          height: '100%',
+          background: 'white',
+          width: isMobile ? '280px' : 'auto',
+          transform: isMobile ? (showMobileSidebar ? 'translateX(0)' : 'translateX(-100%)') : 'none',
+          transition: 'transform 0.3s ease',
+          boxShadow: showMobileSidebar ? '2px 0 10px rgba(0,0,0,0.2)' : 'none'
+      }}>
+        <AgendaSidebar
+          onBack={onBack}
+          onOpenConfig={() => setIsConfigOpen(true)}
+          onOpenEvents={() => setIsEventsManagerOpen(true)}
+          isMonthInitialized={isMonthInitialized}
+          onRegenerate={handleRegenerateMonth}
+          onInitialize={handleInitializeMonth}
+          activeSidePanel={activeSidePanel}
+          setActiveSidePanel={setActiveSidePanel}
+          isPausedSidebarOpen={isPausedSidebarOpen}
+          setIsPausedSidebarOpen={setIsPausedSidebarOpen}
+          patientsNeedingAppt={patientsNeedingAppt}
+          waitlist={waitlist}
+          pausedList={pausedList}
+          onOpenPausedSidebar={handleOpenPausedSidebar}
+          onScheduleNeeding={handleScheduleNeedingPatient}
+          onArchivePatient={handleArchivePatient}
+          onAddWaitlist={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true); }}
+          onDeleteWaitlist={handleDeleteWaitlistItem}
+          onReactivatePatient={handleReactivatePatient}
+        />
+        {/* Botón cerrar sidebar en móvil */}
+        {isMobile && showMobileSidebar && (
+           <button 
+             onClick={() => setShowMobileSidebar(false)}
+             style={{
+               position:'absolute', top:'10px', right:'10px', 
+               background:'#f5f5f5', border:'1px solid #ccc', borderRadius:'4px', padding:'5px'
+             }}
+           >
+             ✕
+           </button>
+        )}
+      </div>
+
+      {/* OVERLAY PARA CERRAR EN MÓVIL AL TOCAR AFUERA */}
+      {isMobile && showMobileSidebar && (
+        <div 
+          onClick={() => setShowMobileSidebar(false)}
+          style={{position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 90}}
+        />
+      )}
 
       {/* --- ÁREA PRINCIPAL (CALENDARIO) --- */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position:'relative' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position:'relative', minWidth: 0 }}>
+        
+        {/* HEADER MORADO CON BOTÓN DE MENÚ */}
         <div style={{background: '#673AB7', color: 'white', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)'}}>
+          
+          {/* BOTÓN HAMBURGUESA (SOLO MÓVIL) */}
+          {isMobile && (
+            <button 
+              onClick={() => setShowMobileSidebar(true)}
+              style={{background:'none', border:'none', color:'white', fontSize:'20px', cursor:'pointer', marginRight:'5px'}}
+            >
+              ☰
+            </button>
+          )}
+
           <span style={{fontWeight: 'bold', fontSize: '14px', background:'rgba(255,255,255,0.2)', padding:'2px 8px', borderRadius:'4px'}}>{MONTHS_LIST[selectedDate.getMonth()].toUpperCase()} - PROYECTO:</span>
-          {isMonthInitialized ? ( isEditingGoal ? ( <input autoFocus value={monthGoal} onChange={(e) => setMonthGoal(e.target.value)} onBlur={handleSaveGoal} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveGoal(); }} style={{flex: 1, border: 'none', borderRadius: '4px', padding: '5px', color: '#333'}} /> ) : ( <div onClick={() => setIsEditingGoal(true)} style={{flex: 1, cursor: 'pointer', borderBottom: '1px dashed rgba(255,255,255,0.5)', paddingBottom: '2px'}} title="Click para editar"> {monthGoal || "Click aquí para definir la meta de este mes..."} ✎ </div> ) ) : ( <div style={{flex: 1, color: 'rgba(255,255,255,0.7)', fontStyle: 'italic', fontSize:'13px'}}> (Inicializa este mes para agregar un proyecto) </div> )}
+          {isMonthInitialized ? ( isEditingGoal ? ( <input autoFocus value={monthGoal} onChange={(e) => setMonthGoal(e.target.value)} onBlur={handleSaveGoal} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveGoal(); }} style={{flex: 1, border: 'none', borderRadius: '4px', padding: '5px', color: '#333'}} /> ) : ( <div onClick={() => setIsEditingGoal(true)} style={{flex: 1, cursor: 'pointer', borderBottom: '1px dashed rgba(255,255,255,0.5)', paddingBottom: '2px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}} title="Click para editar"> {monthGoal || "Click meta..."} ✎ </div> ) ) : ( <div style={{flex: 1, color: 'rgba(255,255,255,0.7)', fontStyle: 'italic', fontSize:'13px'}}> (Inicializa mes) </div> )}
         </div>
 
         <div style={{ padding: '20px', background: 'white', display:'flex', justifyContent:'center', alignItems:'center', borderBottom:'1px solid #eee', gap:'15px' }}>
           <button onClick={handlePrevMonth} style={{background:'none', border:'none', fontSize:'24px', cursor:'pointer', color:'#555'}}> ◀ </button>
           <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-            <select value={selectedDate.getMonth()} onChange={handleMonthChange} style={{padding:'8px 12px', fontSize:'18px', fontWeight:'bold', textTransform:'uppercase', border:'1px solid #ccc', borderRadius:'6px', background:'#fff', color:'#333'}}> {MONTHS_LIST.map((m, i) => ( <option key={i} value={i}>{m}</option> ))} </select>
-            <select value={selectedDate.getFullYear()} onChange={handleYearChange} style={{padding:'8px 12px', fontSize:'18px', fontWeight:'bold', border:'1px solid #ccc', borderRadius:'6px', background:'#fff', color:'#333'}}> {YEARS_LIST.map(y => ( <option key={y} value={y}>{y}</option> ))} </select>
+            <select value={selectedDate.getMonth()} onChange={handleMonthChange} style={{padding:'8px 12px', fontSize:'16px', fontWeight:'bold', textTransform:'uppercase', border:'1px solid #ccc', borderRadius:'6px', background:'#fff', color:'#333'}}> {MONTHS_LIST.map((m, i) => ( <option key={i} value={i}>{m}</option> ))} </select>
+            <select value={selectedDate.getFullYear()} onChange={handleYearChange} style={{padding:'8px 12px', fontSize:'16px', fontWeight:'bold', border:'1px solid #ccc', borderRadius:'6px', background:'#fff', color:'#333'}}> {YEARS_LIST.map(y => ( <option key={y} value={y}>{y}</option> ))} </select>
           </div>
           <button onClick={handleNextMonth} style={{background:'none', border:'none', fontSize:'24px', cursor:'pointer', color:'#555'}}> ▶ </button>
         </div>
 
-        <div style={{flex:1, padding:'20px', overflowY:'auto'}}>
-          <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', textAlign:'center', marginBottom:'10px', color:'#777', fontWeight:'bold'}}> {DAYS_HEADER.map(d => <div key={d}>{d}</div>)} </div>
-          <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gridAutoRows:'minmax(100px, 1fr)', gap:'10px'}}>
+        <div style={{flex:1, padding:'10px', overflowY:'auto'}}>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', textAlign:'center', marginBottom:'10px', color:'#777', fontWeight:'bold', fontSize: isMobile ? '10px' : '14px'}}> {DAYS_HEADER.map(d => <div key={d}>{isMobile ? d.charAt(0) : d}</div>)} </div>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gridAutoRows:'minmax(80px, 1fr)', gap:'5px'}}>
             {calendarDays.map((dateObj, i) => {
               if (!dateObj) return <div key={i} />;
               const isToday = dateObj.toDateString() === new Date().toDateString();
@@ -858,11 +918,11 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
                 if (slots.length > 0) { hasSlots = true; available = slots.filter(([,v]) => { if(v.status !== 'available') return false; if(isPastDay) return false; if(isToday) { const [h, m] = v.time.split(':').map(Number); return dayjs().hour(h).minute(m).isAfter(dayjs()); } return true; }).length; }
               }
               let bg = 'white'; let status = ''; let statusCol = '#999';
-              if (isPastDay) { bg = '#f9f9f9'; } else if (hasSlots) { if (available === 0) { bg = '#FFEBEE'; status = 'Agotado'; statusCol = '#D32F2F'; } else { bg = '#E8F5E9'; status = `${available} Espacios Disponibles`; statusCol = '#2E7D32'; } }
+              if (isPastDay) { bg = '#f9f9f9'; } else if (hasSlots) { if (available === 0) { bg = '#FFEBEE'; status = isMobile ? '0' : 'Agotado'; statusCol = '#D32F2F'; } else { bg = '#E8F5E9'; status = isMobile ? `${available}` : `${available} Libres`; statusCol = '#2E7D32'; } }
               return (
-                <div key={i} onClick={() => { setSelectedDate(dateObj); setIsDayViewOpen(true); }} style={{ background: isToday ? '#E3F2FD' : bg, border: isToday ? '2px solid #2196F3' : '1px solid #ddd', borderRadius: '8px', padding:'10px', cursor:'pointer', display:'flex', flexDirection:'column', justifyContent:'space-between' }}>
-                  <span style={{fontWeight:'bold', color: isToday ? '#1565C0' : '#333', fontSize:'18px'}}>{dateObj.getDate()}</span>
-                  {status && <div style={{alignSelf:'flex-end', fontSize:'11px', fontWeight:'bold', color: statusCol, background:'rgba(255,255,255,0.7)', padding:'2px 6px', borderRadius:'10px'}}>{status}</div>}
+                <div key={i} onClick={() => { setSelectedDate(dateObj); setIsDayViewOpen(true); }} style={{ background: isToday ? '#E3F2FD' : bg, border: isToday ? '2px solid #2196F3' : '1px solid #ddd', borderRadius: '4px', padding:'5px', cursor:'pointer', display:'flex', flexDirection:'column', justifyContent:'space-between', minHeight: isMobile ? '60px' : '100px' }}>
+                  <span style={{fontWeight:'bold', color: isToday ? '#1565C0' : '#333', fontSize: isMobile ? '14px' : '18px'}}>{dateObj.getDate()}</span>
+                  {status && <div style={{alignSelf:'flex-end', fontSize:'10px', fontWeight:'bold', color: statusCol, background:'rgba(255,255,255,0.7)', padding:'2px 4px', borderRadius:'10px'}}>{status}</div>}
                 </div>
               )
             })}
@@ -872,8 +932,8 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
 
       {/* --- MODALES INLINE (Estos pueden refactorizarse en una fase 2) --- */}
       {isDayViewOpen && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'end', zIndex:10}}>
-          <div style={{width:'400px', background:'white', height:'100%', padding:'20px', display:'flex', flexDirection:'column', boxShadow:'-5px 0 20px rgba(0,0,0,0.1)'}}>
+        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'end', zIndex:100}}>
+          <div style={{width: isMobile ? '100%' : '400px', background:'white', height:'100%', padding:'20px', display:'flex', flexDirection:'column', boxShadow:'-5px 0 20px rgba(0,0,0,0.1)'}}>
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'20px', borderBottom:'1px solid #eee', paddingBottom:'15px'}}>
               <div> <h2 style={{margin:0}}>{selectedDate.toLocaleDateString('es-ES', {weekday:'long', day:'numeric'})}</h2> <div style={{display:'flex', gap:'10px', marginTop:'10px'}}> <button onClick={handleBlockDay} style={{fontSize:'12px', padding:'5px 12px', background:'#FFEBEE', color:'#D32F2F', border:'1px solid #FFCDD2', borderRadius:'20px', cursor:'pointer', fontWeight:'bold'}}>🚫 Bloquear día</button> <button onClick={handleAddExtraSlot} style={{fontSize:'12px', padding:'5px 12px', background:'#E3F2FD', color:'#1565C0', border:'1px solid #BBDEFB', borderRadius:'20px', cursor:'pointer', fontWeight:'bold'}}>➕ Turno Extra</button> </div> </div>
               <button onClick={() => setIsDayViewOpen(false)} style={{border:'none', background:'none', fontSize:'24px', cursor:'pointer'}}> ✕ </button>
