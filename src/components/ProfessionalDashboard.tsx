@@ -17,26 +17,23 @@ interface Props {
   user: any;
 }
 
-// --- COMPONENTE: GRÁFICO DE DONA CSS ---
-const DoughnutChart = ({ percent, color, size = 100, label }: any) => {
+// --- COMPONENTES UI ADAPTADOS A TAILWIND (V2 STYLE) ---
+
+const DoughnutChart = ({ percent, color, size = 80, label }: any) => {
   return (
-    <div style={{position:'relative', width: size, height: size, display:'flex', justifyContent:'center', alignItems:'center'}}>
-      <div style={{
-         position:'absolute', inset:0, borderRadius:'50%',
-         background: `conic-gradient(${color} ${percent}%, #E0E0E0 0)`
-      }}></div>
-      <div style={{
-         position:'absolute', inset:'8px', borderRadius:'50%', background:'white',
-         display:'flex', flexDirection:'column', justifyContent:'center', alignItems:'center'
-      }}>
-         <span style={{fontSize:'18px', fontWeight:'bold', color: '#333'}}>{percent}%</span>
-         {label && <span style={{fontSize:'9px', color:'#666', textTransform:'uppercase'}}>{label}</span>}
+    <div className="relative flex justify-center items-center" style={{ width: size, height: size }}>
+      <div 
+        className="absolute inset-0 rounded-full"
+        style={{ background: `conic-gradient(${color} ${percent}%, #334155 0)` }}
+      ></div>
+      <div className="absolute inset-2 rounded-full bg-slate-800 flex flex-col justify-center items-center">
+         <span className="text-lg font-bold text-white">{percent}%</span>
+         {label && <span className="text-[9px] text-slate-400 uppercase tracking-wide">{label}</span>}
       </div>
     </div>
   );
 };
 
-// --- COMPONENTE: BARRA DE PROGRESO DE TAREA ---
 const TaskProgressBar = ({ task }: { task: any }) => {
   const completed = task.completionHistory?.length || 0;
   const total = task.totalVolumeExpected || 1;
@@ -48,38 +45,48 @@ const TaskProgressBar = ({ task }: { task: any }) => {
   if (task.durationWeeks) durationDays = task.durationWeeks * 7;
   const endDate = new Date(createdAt);
   endDate.setDate(endDate.getDate() + durationDays);
+  
   const totalTime = endDate.getTime() - createdAt.getTime();
   const elapsedTime = now.getTime() - createdAt.getTime();
   const timePercent = Math.min(100, Math.max(0, (elapsedTime / totalTime) * 100));
 
-  let statusColor = '#4CAF50'; 
+  let statusColor = 'bg-green-500'; 
   let statusText = 'A tiempo';
-  if (percent >= 100) { statusColor = '#2E7D32'; statusText = 'Completada'; }
-  else if (percent < (timePercent - 15)) { statusColor = '#F44336'; statusText = 'Atrasado'; }
-  else if (percent > timePercent + 10) { statusColor = '#2196F3'; statusText = 'Adelantado'; }
+  let statusTextColor = 'text-green-400';
+
+  if (percent >= 100) { statusColor = 'bg-green-600'; statusText = 'Completada'; statusTextColor = 'text-green-500'; }
+  else if (percent < (timePercent - 15)) { statusColor = 'bg-red-500'; statusText = 'Atrasado'; statusTextColor = 'text-red-400'; }
+  else if (percent > timePercent + 10) { statusColor = 'bg-blue-500'; statusText = 'Adelantado'; statusTextColor = 'text-blue-400'; }
 
   return (
-    <div style={{marginTop:'10px'}}>
-      <div style={{display:'flex', justifyContent:'space-between', fontSize:'11px', marginBottom:'3px', color:'#666'}}>
+    <div className="mt-3">
+      <div className="flex justify-between text-xs mb-1 text-slate-400">
         <span>{completed}/{total} reps</span>
-        <span style={{color: statusColor, fontWeight:'bold'}}>{statusText}</span>
+        <span className={`font-bold ${statusTextColor}`}>{statusText}</span>
       </div>
-      <div style={{width:'100%', height:'6px', background:'#eee', borderRadius:'3px', overflow:'hidden', position:'relative'}}>
-        <div style={{width:`${percent}%`, height:'100%', background: statusColor, transition:'width 0.5s ease', borderRadius:'3px'}}></div>
-        {percent < 100 && <div style={{position:'absolute', top:0, bottom:0, width:'2px', background:'rgba(0,0,0,0.3)', left:`${timePercent}%`, zIndex:2}} title="Meta hoy" />}
+      <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden relative">
+        <div 
+            className={`h-full ${statusColor} transition-all duration-500 rounded-full`} 
+            style={{ width: `${percent}%` }}
+        ></div>
+        {percent < 100 && (
+            <div 
+                className="absolute top-0 bottom-0 w-0.5 bg-white/30 z-10" 
+                style={{ left: `${timePercent}%` }} 
+                title="Meta hoy" 
+            />
+        )}
       </div>
     </div>
   );
 };
 
-// --- COMPONENTE VISUAL STATS (INTEGRADO: TAGS + CARGA COGNITIVA) ---
 const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) => {
     const [newTag, setNewTag] = useState('');
 
     const activeTasks = tasks.filter((t:any) => t.status !== 'completed');
     const completedTasks = tasks.filter((t:any) => t.status === 'completed');
     
-    // Cálculos de Adherencia
     let totalExpected = 0;
     let totalDone = 0;
     activeTasks.forEach((t:any) => {
@@ -87,93 +94,56 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) =
         totalDone += (t.completionHistory?.length || 0);
     });
     const globalAdherence = totalExpected > 0 ? Math.round((totalDone / totalExpected) * 100) : 0;
-
-    // Cálculos de Carga Cognitiva
     const routinesCount = activeTasks.filter((t:any) => t.type === 'routine').length;
     const missionsCount = activeTasks.filter((t:any) => t.type !== 'routine').length;
 
     return (
-        <div style={{
-            background:'white', borderRadius:'12px', padding:'0', 
-            boxShadow:'0 2px 8px rgba(0,0,0,0.05)', marginBottom:'20px', 
-            display:'flex', overflow:'hidden', minHeight:'160px',
-            color: '#333' /* FIX: Forzar color oscuro dentro de este componente */
-        }}>
-            
-            {/* 1. IZQUIERDA: ADHERENCIA + CARGA COGNITIVA */}
-            <div style={{
-                padding:'15px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', 
-                minWidth:'160px', borderRight:'1px solid #f0f0f0', background:'#FAFAFA'
-            }}>
-               <DoughnutChart percent={globalAdherence} color="#2196F3" size={70} label="Adherencia" />
-               
-               {/* Sección de Carga Cognitiva Visual */}
-               <div style={{marginTop:'12px', width:'100%', textAlign:'center'}}>
-                   <div style={{fontSize:'10px', fontWeight:'bold', color:'#555', marginBottom:'4px', textTransform:'uppercase'}}>
-                       Carga Activa ({activeTasks.length})
-                   </div>
-                   <div style={{display:'flex', justifyContent:'center', gap:'8px', fontSize:'11px'}}>
-                       <span style={{color:'#9C27B0', fontWeight:'bold', background:'#F3E5F5', padding:'2px 6px', borderRadius:'4px'}}>
-                           🟣 {routinesCount} Rut
-                       </span>
-                       <span style={{color:'#E65100', fontWeight:'bold', background:'#FFF3E0', padding:'2px 6px', borderRadius:'4px'}}>
-                           🟠 {missionsCount} Mis
-                       </span>
+        <div className="bg-slate-800 rounded-xl shadow-lg mb-6 flex flex-col sm:flex-row overflow-hidden border border-slate-700">
+            {/* 1. IZQUIERDA: ADHERENCIA */}
+            <div className="p-4 bg-slate-800/50 border-b sm:border-b-0 sm:border-r border-slate-700 flex flex-col items-center justify-center min-w-[140px]">
+               <DoughnutChart percent={globalAdherence} color="#3b82f6" size={70} label="Adherencia" />
+               <div className="mt-3 text-center w-full">
+                   <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Carga Activa ({activeTasks.length})</div>
+                   <div className="flex justify-center gap-2 text-[10px]">
+                       <span className="bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded border border-purple-500/30">🟣 {routinesCount} Rut</span>
+                       <span className="bg-orange-900/40 text-orange-300 px-2 py-0.5 rounded border border-orange-500/30">🟠 {missionsCount} Mis</span>
                    </div>
                </div>
             </div>
 
-            {/* 2. CENTRO: PANEL DE TAGS (CON VISIBILIDAD GARANTIZADA) */}
-            <div style={{flex: 1, padding:'20px', display:'flex', flexDirection:'column', background:'white'}}>
-               <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
-                  <h4 style={{margin:0, color:'#37474F', fontSize:'12px', textTransform:'uppercase', fontWeight:'bold'}}>
-                      🏷️ Vocabulario Clínico (Tags)
-                  </h4>
-                  <span style={{fontSize:'10px', color:'#999'}}>{indicators.length} activos</span>
+            {/* 2. CENTRO: TAGS */}
+            <div className="flex-1 p-4 flex flex-col bg-slate-800">
+               <div className="flex justify-between items-center mb-2">
+                  <h4 className="m-0 text-slate-300 text-xs uppercase font-bold tracking-wider">🏷️ Vocabulario Clínico</h4>
+                  <span className="text-[10px] text-slate-500">{indicators.length} activos</span>
                </div>
                
-               {/* Área de Scroll de Tags con Altura Mínima Reservada */}
-               <div style={{
-                   flex:1, 
-                   minHeight:'60px', /* Garantiza espacio aunque esté vacío */
-                   maxHeight:'90px', 
-                   overflowY:'auto', 
-                   display:'flex', 
-                   flexWrap:'wrap', 
-                   gap:'6px', 
-                   alignContent:'flex-start', 
-                   marginBottom:'10px'
-               }}>
+               <div className="flex-1 min-h-[50px] max-h-[80px] overflow-y-auto flex flex-wrap gap-2 content-start mb-2 custom-scrollbar">
                    {indicators.length === 0 && (
-                       <div style={{fontSize:'11px', color:'#ccc', fontStyle:'italic', width:'100%', marginTop:'5px'}}>
-                           Sin observaciones. Escribe abajo para agregar...
-                       </div>
+                       <div className="text-xs text-slate-600 italic mt-1 w-full text-center">Sin observaciones clínicas...</div>
                    )}
                    {indicators.map((tag: string, i: number) => (
-                       <span key={i} style={{background:'#FFF9C4', border:'1px solid #FFF59D', padding:'3px 8px', borderRadius:'12px', fontSize:'11px', color:'#444', display:'flex', alignItems:'center', gap:'5px'}}>
+                       <span key={i} className="bg-yellow-900/20 border border-yellow-600/30 text-yellow-200 px-2 py-1 rounded-full text-[10px] flex items-center gap-1">
                           {tag}
                           <button 
                             onClick={() => onDeleteTag(tag)}
-                            style={{border:'none', background:'none', color:'#D32F2F', cursor:'pointer', fontWeight:'bold', fontSize:'14px', lineHeight:1, padding:0}}
+                            className="text-red-400 hover:text-red-300 font-bold ml-1"
                           >×</button>
                        </span>
                    ))}
                </div>
 
-               {/* Input Integrado */}
-               <div style={{display:'flex', background:'white', border:'1px solid #e0e0e0', borderRadius:'6px', padding:'2px 5px'}}>
+               <div className="flex bg-slate-900 border border-slate-700 rounded-lg p-1">
                   <input 
+                    className="flex-1 bg-transparent border-none text-xs text-white outline-none px-2 py-1 placeholder-slate-600"
                     value={newTag}
                     onChange={(e) => setNewTag(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter') { onAddTag(newTag); setNewTag(''); }
-                    }}
-                    placeholder="+ Agregar observación (ej. 'ansiedad')..." 
-                    style={{border:'none', flex:1, fontSize:'12px', outline:'none', padding:'6px', color:'#333'}}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { onAddTag(newTag); setNewTag(''); }}}
+                    placeholder="+ Agregar (ej. 'ansiedad')..." 
                   />
                   <button 
                     onClick={() => { onAddTag(newTag); setNewTag(''); }}
-                    style={{background:'none', border:'none', color:'#2196F3', fontWeight:'bold', cursor:'pointer', fontSize:'11px', textTransform:'uppercase'}}
+                    className="text-nexus-cyan text-[10px] font-bold uppercase px-2 hover:bg-white/5 rounded"
                   >
                     Guardar
                   </button>
@@ -181,21 +151,21 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) =
             </div>
 
             {/* 3. DERECHA: HISTÓRICO */}
-            <div style={{
-                padding:'20px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', 
-                minWidth:'100px', borderLeft:'1px solid #f0f0f0'
-            }}>
-               <div style={{fontSize:'24px', fontWeight:'bold', color:'#4CAF50', lineHeight:1}}>{completedTasks.length}</div>
-               <div style={{fontSize:'10px', color:'#666', textTransform:'uppercase', textAlign:'center', marginTop:'5px'}}>Completadas</div>
-               <div style={{fontSize:'24px', marginTop:'5px'}}>🏆</div>
+            <div className="p-4 bg-slate-800/50 border-t sm:border-t-0 sm:border-l border-slate-700 flex flex-col items-center justify-center min-w-[100px]">
+               <div className="text-2xl font-bold text-green-500 leading-none">{completedTasks.length}</div>
+               <div className="text-[9px] text-slate-500 uppercase text-center mt-1">Completadas</div>
+               <div className="text-xl mt-1">🏆</div>
             </div>
         </div>
     );
 };
 
+
+// --- COMPONENTE PRINCIPAL ---
+
 export default function ProfessionalDashboard({ user }: Props) {
-  // --- ESTADOS ---
-  const [view, setView] = useState<'dashboard' | 'agenda' | 'team' | 'patients_manage' | 'patient_detail' | 'analytics'>('dashboard');
+  // --- ESTADOS DE V1 (LÓGICA) ---
+  const [activeView, setActiveView] = useState('dashboard');
   const [assistants, setAssistants] = useState<any[]>([]);
   const [activePatients, setActivePatients] = useState<any[]>([]);
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
@@ -218,37 +188,26 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [taskToEdit, setTaskToEdit] = useState<any>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [taskForHistory, setTaskForHistory] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  // --- 1. LÓGICA DE VOCABULARIO CONTROLADO ---
+  // --- ESTADOS DE V2 (UI) ---
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [tagsCatalog, setTagsCatalog] = useState<Record<string, string>>({});
 
+  // --- EFECTOS (CARGA DE DATOS V1) ---
   useEffect(() => {
     loadData();
-    
     const LOCAL_DICTIONARY = {
-        "desvelo": "Insomnio",
-        "no duermo": "Insomnio",
-        "triste": "Bajo Estado de Ánimo",
-        "tristeza": "Bajo Estado de Ánimo",
-        "llanto": "Labilidad Emocional",
-        "nervioso": "Ansiedad",
-        "nervios": "Ansiedad",
-        "panico": "Crisis de Pánico",
-        "miedo": "Temor",
-        "cansado": "Fatiga",
-        "agotado": "Fatiga"
+        "desvelo": "Insomnio", "no duermo": "Insomnio", "triste": "Bajo Estado de Ánimo",
+        "tristeza": "Bajo Estado de Ánimo", "llanto": "Labilidad Emocional", "nervioso": "Ansiedad",
+        "nervios": "Ansiedad", "panico": "Crisis de Pánico", "miedo": "Temor", "cansado": "Fatiga", "agotado": "Fatiga"
     };
     setTagsCatalog(LOCAL_DICTIONARY);
-
   }, [user]);
 
-  // Función Normalizadora (El "Cerebro" de los Tags)
   const normalizeTag = (rawText: string): string => {
       const lower = rawText.toLowerCase().trim();
-      if (tagsCatalog[lower]) {
-          return tagsCatalog[lower];
-      }
-      return lower.charAt(0).toUpperCase() + lower.slice(1);
+      return tagsCatalog[lower] ? tagsCatalog[lower] : lower.charAt(0).toUpperCase() + lower.slice(1);
   };
 
   const loadData = async () => {
@@ -289,7 +248,15 @@ export default function ProfessionalDashboard({ user }: Props) {
           setActivePatients(active);
         }
       }
-    } catch (e) { console.error(e); } 
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  };
+
+  // --- FUNCIONES DE NEGOCIO (V1) ---
+
+  const handleNavigate = (view: string) => {
+    setActiveView(view);
+    if (view === 'patients_manage') setSelectedPatient(null);
+    setIsSidebarOpen(false); 
   };
 
   const handleGenerateAnalytics = async () => {
@@ -307,8 +274,9 @@ export default function ProfessionalDashboard({ user }: Props) {
         if(!Array.isArray(stats)) stats = Object.values(stats);
         stats.sort((a:any,b:any)=>b.globalSuccessRate-a.globalSuccessRate);
         setInterventionStats(stats); setAnalyticsLoaded(true);
-    } catch (e) { console.error(e); alert("Error reporte"); } finally { setLoadingAnalytics(false); }
+    } catch (e) { console.error(e); alert("Error al generar reporte"); } finally { setLoadingAnalytics(false); }
   };
+
   const topPerformer = interventionStats.length > 0 ? interventionStats[0] : null;
   const mostAbandoned = [...interventionStats].sort((a,b) => b.dropoutRate - a.dropoutRate)[0];
 
@@ -332,7 +300,7 @@ export default function ProfessionalDashboard({ user }: Props) {
         const manTeam = man.careTeam?.[user.uid];
         if(manTeam?.customPrice) batch.update(patRef, {[`careTeam.${teamKey}.customPrice`]: manTeam.customPrice});
         if(manTeam?.noShowCount) batch.update(patRef, {[`careTeam.${teamKey}.noShowCount`]: manTeam.noShowCount});
-
+        
         const [qM, qR] = await Promise.all([
              getDocs(query(collection(db,"assigned_missions"), where("patientId","==",manualIdToMerge))),
              getDocs(query(collection(db,"assigned_routines"), where("patientId","==",manualIdToMerge)))
@@ -342,7 +310,7 @@ export default function ProfessionalDashboard({ user }: Props) {
         batch.delete(doc(db,"patients",manualIdToMerge));
       }
       batch.update(patRef, {isAuthorized:true, [`careTeam.${teamKey}.active`]:true, [`careTeam.${teamKey}.status`]:'active', [`careTeam.${teamKey}.joinedAt`]:new Date().toISOString()});
-      await batch.commit(); alert("✅ Listo"); setIsMergeModalOpen(false); loadData();
+      await batch.commit(); alert("✅ Paciente autorizado correctamente"); setIsMergeModalOpen(false); loadData();
     } catch(e:any){ console.error(e); alert(e.message); } 
   };
 
@@ -353,13 +321,13 @@ export default function ProfessionalDashboard({ user }: Props) {
   };
 
   const handleRegisterAttendance = async () => {
-    if(!selectedPatient || (profData?.nexusBalance||0)<1) return alert("❌ Saldo insuficiente");
-    if(!window.confirm("¿Registrar asistencia? (-1 Nexus)")) return;
+    if(!selectedPatient || (profData?.nexusBalance||0)<1) return alert("❌ Saldo Nexus insuficiente");
+    if(!window.confirm("¿Registrar asistencia y descontar 1 Nexus?")) return;
     try {
        const batch = writeBatch(db);
        batch.update(doc(db,"professionals",user.uid),{nexusBalance:increment(-1),"metrics.nexusDistributed":increment(1)});
        batch.update(doc(db,"patients",selectedPatient.id),{[`lastAttendance.${user.uid}`]:serverTimestamp(),"gamificationProfile.currentXp":increment(50),"gamificationProfile.wallet.nexus":increment(1)});
-       await batch.commit(); alert("✅ Asistencia OK");
+       await batch.commit(); alert("✅ Asistencia registrada. +50 XP al paciente.");
        setProfData((p:any)=>({...p, nexusBalance: p.nexusBalance-1}));
        setSelectedPatient((p:any)=>({...p, lastAttendance:{...p.lastAttendance,[user.uid]:new Date()}}));
        setTaskToEdit(null); setIsAssignmentModalOpen(true);
@@ -369,7 +337,7 @@ export default function ProfessionalDashboard({ user }: Props) {
   const handleOpenCreateTask = () => { if(!hasValidAttendance(selectedPatient)) return handleRegisterAttendance(); setTaskToEdit(null); setIsAssignmentModalOpen(true); };
   const handleOpenEditTask = (t:any) => { setTaskToEdit(t); setIsAssignmentModalOpen(true); };
   const handleViewProgress = (t:any) => { setTaskForHistory(t); setIsHistoryOpen(true); };
-  const handleOpenPatient = async (p:any) => { setSelectedPatient(p); setView('patient_detail'); await loadPatientTasks(p.id); };
+  const handleOpenPatient = async (p:any) => { setSelectedPatient(p); setActiveView('patient_detail'); await loadPatientTasks(p.id); setIsSidebarOpen(false); };
   
   const loadPatientTasks = async (pid:string) => {
      try {
@@ -382,7 +350,7 @@ export default function ProfessionalDashboard({ user }: Props) {
      } catch(e){console.error(e);}
   };
   const handleDeleteTask = async (tid:string, isR:boolean) => {
-     if(!window.confirm("¿Eliminar?")) return;
+     if(!window.confirm("¿Eliminar esta tarea del plan?")) return;
      await deleteDoc(doc(db, isR?"assigned_routines":"assigned_missions", tid));
      loadPatientTasks(selectedPatient.id);
   };
@@ -409,160 +377,355 @@ export default function ProfessionalDashboard({ user }: Props) {
 
   const filteredPatients = activePatients.filter(p => p.fullName.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // FIX PRINCIPAL: Agregado color: '#1e293b' para asegurar texto oscuro en modo claro
-  return (
-    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'sans-serif', background: '#F4F6F8' }}>
-      <DashboardMenu activeView={view} onNavigate={setView} onLogout={() => auth.signOut()} />
-      <div style={{ flex: 1, padding: '30px', maxWidth: '1200px', margin: '0 auto', overflowY: 'auto', color: '#1e293b' }}>
-        
-        {/* HEADER */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom:'1px solid #E0E0E0', paddingBottom:'20px' }}>
-          <div>
-             <h1 style={{ margin: 0, color: '#37474F', fontSize: '24px' }}>
-              {view === 'dashboard' && 'Resumen General'}
-              {view === 'patients_manage' && 'Gestión de Pacientes'}
-              {view === 'agenda' && 'Mi Agenda'}
-              {view === 'team' && 'Equipo Clínico'}
-              {view === 'patient_detail' && 'Expediente Clínico'}
-              {view === 'analytics' && 'Analítica de Intervención'}
-             </h1>
-             <p style={{ margin: '5px 0', color: '#78909C' }}>Dr(a). {profData?.fullName}</p>
-          </div>
-          <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-             {profData?.professionalCode && <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#1565C0', fontWeight:'bold', border:'1px solid #BBDEFB' }}>🔑 {profData.professionalCode}</span>}
-             <span style={{ background: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#00695C', fontWeight:'bold', border:'1px solid #B2DFDB' }}>💎 {profData?.nexusBalance || 0} Nexus</span>
-          </div>
-        </div>
+  // --- RENDER (UI ESTILO V2 CON DATOS V1) ---
 
-        {view === 'agenda' ? <AgendaView userRole="professional" currentUserId={user.uid} onBack={() => setView('dashboard')} /> :
-         view === 'patients_manage' ? (
-           <div>
-             {pendingPatients.map(p=><div key={p.id} style={{background:'#FFF3E0', padding:'15px', marginBottom:'10px', borderRadius:'8px', display:'flex', justifyContent:'space-between', color: '#333'}}><div>{p.fullName}</div><button onClick={()=>handleOpenApproveModal(p)}>Revisar</button></div>)}
-             <div style={{display:'flex', justifyContent:'space-between', marginBottom:'15px'}}><h3 style={{margin:0}}>Activos ({activePatients.length})</h3><input placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} style={{padding:'8px', color: '#333'}}/></div>
-             <div style={{background:'white', borderRadius:'8px', overflow:'hidden'}}>
-               {filteredPatients.map(p=>(
-                 <div key={p.id} style={{padding:'15px', borderBottom:'1px solid #eee', display:'flex', justifyContent:'space-between'}}>
-                    <div><strong style={{color:'#333'}}>{p.fullName}</strong><div style={{fontSize:'12px', color:'#666'}}>{p.email}</div></div>
-                    <button onClick={()=>handleOpenPatient(p)} style={{padding:'5px 15px', borderRadius:'15px', border:'none', background:'#E3F2FD', color:'#1565C0', cursor:'pointer'}}>Expediente</button>
-                 </div>
-               ))}
-             </div>
-           </div>
-         ) : view === 'dashboard' ? (
-            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:'20px', textAlign:'center'}}>
-               <div style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #2196F3', color: '#333'}}><h1>{activePatients.length}</h1>Pacientes</div>
-               <div style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #00BCD4', color: '#333'}}><h1>{profData?.nexusBalance||0}</h1>Nexus</div>
-               <div onClick={()=>setView('analytics')} style={{padding:'30px', background:'white', borderRadius:'12px', borderBottom:'4px solid #673AB7', cursor:'pointer', color: '#333'}}><h1>📊</h1>Analítica</div>
+  if (loading) return <div className="min-h-screen bg-nexus-dark flex items-center justify-center text-nexus-cyan animate-pulse">CARGANDO SISTEMA CLÍNICO...</div>;
+
+  return (
+    <div className="flex h-screen bg-nexus-dark text-slate-200 font-sans overflow-hidden">
+      
+      {/* 1. MENU LATERAL RESPONSIVO */}
+      <DashboardMenu 
+        activeView={activeView} 
+        onNavigate={handleNavigate} 
+        onLogout={() => auth.signOut()} 
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+      />
+
+      {/* 2. ÁREA PRINCIPAL */}
+      <main className="flex-1 flex flex-col h-full overflow-hidden relative w-full">
+        
+        {/* ENCABEZADO */}
+        <header className="p-6 border-b border-slate-800 bg-nexus-dark/95 backdrop-blur flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsSidebarOpen(true)}
+              className="md:hidden p-2 text-white bg-slate-800 rounded-lg hover:bg-nexus-cyan hover:text-black transition-colors"
+            >
+              ☰
+            </button>
+            <div>
+              <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight leading-none">
+                {activeView === 'dashboard' && 'Panel de Control'}
+                {activeView === 'patients_manage' && 'Gestión de Pacientes'}
+                {activeView === 'agenda' && 'Agenda'}
+                {activeView === 'team' && 'Equipo Clínico'}
+                {activeView === 'patient_detail' && 'Expediente'}
+                {activeView === 'analytics' && 'Analítica'}
+                <span className="text-nexus-cyan hidden md:inline"> .PRO</span>
+              </h1>
+              <p className="text-nexus-muted text-xs md:text-sm hidden md:block mt-1">
+                Dr(a). {profData?.fullName || 'Usuario'}
+              </p>
             </div>
-         ) : view === 'analytics' ? (
-             <div style={{color: '#333'}}>
-                {!analyticsLoaded && <button onClick={handleGenerateAnalytics} style={{padding:'15px', background:'#673AB7', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', width:'100%'}}>Generar Reporte Global</button>}
-                {loadingAnalytics && <p>Cargando...</p>}
+          </div>
+
+          <div className="flex items-center gap-4">
+             <div className="bg-emerald-900/20 border border-emerald-500/50 rounded-lg px-3 py-1 flex items-center gap-2">
+                 <span className="text-emerald-400 font-bold text-sm md:text-lg">💎 {profData?.nexusBalance || 0}</span>
+             </div>
+             <div className="hidden sm:flex bg-purple-900/20 border border-purple-500/50 rounded-lg px-3 py-1 flex-col items-end">
+                <span className="text-[10px] text-purple-300 uppercase tracking-widest font-bold">Cód. Vinculación</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-mono text-white font-black">{profData?.professionalCode || '---'}</span>
+                  <button onClick={() => navigator.clipboard.writeText(profData?.professionalCode)} className="text-purple-400 hover:text-white">📋</button>
+                </div>
+             </div>
+          </div>
+        </header>
+
+        {/* CONTENIDO SCROLLEABLE (Con corrección de Padding para Agenda) */}
+        <div className={`flex-1 overflow-y-auto custom-scrollbar ${activeView === 'agenda' ? 'p-0' : 'p-4 md:p-8'}`}>
+          
+          {/* VISTA: DASHBOARD */}
+          {activeView === 'dashboard' && (
+            <div className="space-y-6 animate-fadeIn pb-20">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+                <div className="nexus-card flex items-center gap-4">
+                  <div className="p-4 bg-blue-900/30 rounded-lg text-blue-400 text-3xl">👥</div>
+                  <div>
+                    <div className="text-2xl font-bold text-white">{activePatients.length}</div>
+                    <div className="text-xs text-slate-400 uppercase tracking-wider">Pacientes Activos</div>
+                  </div>
+                </div>
+                <div className="nexus-card flex items-center gap-4">
+                  <div className="p-4 bg-emerald-900/30 rounded-lg text-emerald-400 text-3xl">💎</div>
+                  <div>
+                    <div className="text-2xl font-bold text-white">{profData?.nexusBalance || 0}</div>
+                    <div className="text-xs text-slate-400 uppercase tracking-wider">Saldo Disponible</div>
+                  </div>
+                </div>
+                 <div onClick={()=>setActiveView('analytics')} className="nexus-card flex items-center gap-4 cursor-pointer hover:border-purple-500 transition-colors">
+                  <div className="p-4 bg-purple-900/30 rounded-lg text-purple-400 text-3xl">📊</div>
+                  <div>
+                    <div className="text-lg font-bold text-white">Ver Métricas</div>
+                    <div className="text-xs text-slate-400 uppercase tracking-wider">Rendimiento</div>
+                  </div>
+                </div>
+              </div>
+
+              {pendingPatients.length > 0 && (
+                <div className="bg-orange-900/20 border border-orange-500/50 p-4 rounded-xl">
+                    <h3 className="text-orange-400 font-bold mb-2">⚠️ Solicitudes Pendientes ({pendingPatients.length})</h3>
+                    <p className="text-sm text-slate-300 mb-2">Tienes pacientes esperando autorización para vincularse.</p>
+                    <button onClick={() => setActiveView('patients_manage')} className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded text-sm font-bold">Gestionar Ahora</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VISTA: GESTIÓN DE PACIENTES */}
+          {activeView === 'patients_manage' && (
+             <div className="max-w-4xl mx-auto space-y-6">
+                {pendingPatients.length > 0 && (
+                    <div className="space-y-3">
+                        <h3 className="text-sm uppercase text-orange-400 font-bold tracking-wider">Solicitudes de Ingreso</h3>
+                        {pendingPatients.map(p => (
+                            <div key={p.id} className="bg-orange-900/10 border border-orange-500/30 p-4 rounded-lg flex justify-between items-center">
+                                <div>
+                                    <div className="font-bold text-white">{p.fullName}</div>
+                                    <div className="text-xs text-orange-300">{p.email}</div>
+                                </div>
+                                <button onClick={() => handleOpenApproveModal(p)} className="bg-orange-600 text-white px-3 py-1 rounded text-sm font-bold hover:bg-orange-500">Revisar</button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                <div className="flex flex-col gap-4">
+                    <div className="flex justify-between items-end">
+                        <h3 className="text-sm uppercase text-nexus-cyan font-bold tracking-wider">Directorio ({activePatients.length})</h3>
+                    </div>
+                    <input 
+                        type="text" 
+                        placeholder="🔍 Buscar paciente..." 
+                        value={searchTerm}
+                        onChange={e=>setSearchTerm(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:border-nexus-cyan outline-none"
+                    />
+
+                    <div className="grid gap-3">
+                        {filteredPatients.map(p => (
+                            <div key={p.id} className="nexus-card hover:bg-slate-800/80 transition-colors p-4 flex justify-between items-center group">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-lg font-bold text-slate-400">
+                                        {p.fullName.charAt(0)}
+                                    </div>
+                                    <div>
+                                        <div className="font-bold text-white group-hover:text-nexus-cyan transition-colors">{p.fullName}</div>
+                                        <div className="text-xs text-slate-500">{p.email}</div>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => handleOpenPatient(p)}
+                                    className="px-4 py-2 bg-slate-700 hover:bg-nexus-cyan hover:text-black rounded-full text-xs font-bold transition-all"
+                                >
+                                    Expediente →
+                                </button>
+                            </div>
+                        ))}
+                        {filteredPatients.length === 0 && <div className="text-center py-10 text-slate-500">No se encontraron pacientes.</div>}
+                    </div>
+                </div>
+             </div>
+          )}
+
+          {/* VISTA: AGENDA (FULL SCREEN FIX) */}
+          {activeView === 'agenda' && (
+            <div className="w-full min-h-full bg-white text-slate-900 relative">
+              <AgendaView userRole="professional" currentUserId={user.uid} onBack={() => setActiveView('dashboard')} />
+            </div>
+          )}
+
+          {/* VISTA: ANALÍTICA */}
+          {activeView === 'analytics' && (
+             <div className="space-y-6">
+                {!analyticsLoaded && (
+                    <div className="text-center py-10">
+                        <p className="text-slate-400 mb-4">Analiza el rendimiento global de tus intervenciones clínicas.</p>
+                        <button onClick={handleGenerateAnalytics} className="btn-primary py-3 px-8 text-lg w-full md:w-auto">Generar Reporte de Inteligencia</button>
+                    </div>
+                )}
+                {loadingAnalytics && <p className="text-nexus-cyan text-center animate-pulse">Procesando datos del sistema...</p>}
+                
                 {analyticsLoaded && (
-                   <div style={{background:'white', padding:'20px', borderRadius:'10px', color: '#333'}}>
-                      <h3>Top Rendimiento</h3>
-                      {topPerformer && <div style={{color:'#4CAF50'}}>🌟 {topPerformer.title} ({topPerformer.globalSuccessRate.toFixed(0)}% éxito)</div>}
-                      {mostAbandoned && <div style={{color:'#F44336'}}>⚠️ {mostAbandoned.title} ({mostAbandoned.dropoutRate.toFixed(0)}% abandono)</div>}
-                      <table style={{width:'100%', marginTop:'15px', color: '#333'}}>
-                         <thead><tr><th align="left">Tarea</th><th>Uso</th><th>Éxito</th></tr></thead>
-                         <tbody>{interventionStats.map((s,i)=><tr key={i}><td>{s.title}</td><td align="center">{s.usageCount}</td><td align="center">{s.globalSuccessRate.toFixed(0)}%</td></tr>)}</tbody>
-                      </table>
+                   <div className="space-y-6 animate-fadeIn">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {topPerformer && (
+                              <div className="bg-green-900/20 border border-green-500/50 p-4 rounded-xl">
+                                  <div className="text-xs uppercase text-green-400 font-bold mb-1">🌟 Mejor Adherencia</div>
+                                  <div className="text-lg font-bold text-white">{topPerformer.title}</div>
+                                  <div className="text-2xl font-bold text-green-400 mt-2">{topPerformer.globalSuccessRate.toFixed(0)}% <span className="text-xs text-slate-400 font-normal">de éxito</span></div>
+                              </div>
+                          )}
+                          {mostAbandoned && (
+                              <div className="bg-red-900/20 border border-red-500/50 p-4 rounded-xl">
+                                  <div className="text-xs uppercase text-red-400 font-bold mb-1">⚠️ Mayor Abandono</div>
+                                  <div className="text-lg font-bold text-white">{mostAbandoned.title}</div>
+                                  <div className="text-2xl font-bold text-red-400 mt-2">{mostAbandoned.dropoutRate.toFixed(0)}% <span className="text-xs text-slate-400 font-normal">abandono</span></div>
+                              </div>
+                          )}
+                      </div>
+
+                      <div className="nexus-card overflow-hidden">
+                         <h3 className="text-lg font-bold text-white mb-4">Detalle de Intervenciones</h3>
+                         <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left text-slate-300">
+                               <thead className="text-xs text-slate-500 uppercase bg-slate-800">
+                                   <tr>
+                                       <th className="px-4 py-3">Tarea</th>
+                                       <th className="px-4 py-3 text-center">Uso Total</th>
+                                       <th className="px-4 py-3 text-center">Tasa Éxito</th>
+                                   </tr>
+                               </thead>
+                               <tbody className="divide-y divide-slate-700">
+                                   {interventionStats.map((s,i) => (
+                                       <tr key={i} className="hover:bg-slate-800/50">
+                                           <td className="px-4 py-3 font-medium text-white">{s.title}</td>
+                                           <td className="px-4 py-3 text-center">{s.usageCount}</td>
+                                           <td className="px-4 py-3 text-center text-nexus-cyan">{s.globalSuccessRate.toFixed(0)}%</td>
+                                       </tr>
+                                   ))}
+                               </tbody>
+                            </table>
+                         </div>
+                      </div>
                    </div>
                 )}
              </div>
-         ) : view === 'team' ? (
-           <div><h2>Equipo</h2>{assistants.map(a=><div key={a.uid}>{a.displayName}</div>)}</div>
-         ) : view === 'patient_detail' && selectedPatient ? (
-           
-           <div style={{ paddingBottom: '50px' }}>
-             <button onClick={() => setView('patients_manage')} style={{marginBottom:'15px', background:'none', border:'none', color:'#666', cursor:'pointer'}}>⬅ Volver</button>
-             
-             {/* HEADER DETALLE PACIENTE */}
-             <div style={{background:'white', padding:'20px', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.05)', marginBottom:'15px', display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
-                <div>
-                   <h1 style={{margin:'0', color:'#1565C0', fontSize:'20px'}}>{selectedPatient.fullName}</h1>
-                   <div style={{color:'#666', fontSize:'13px', marginTop:'2px'}}>{selectedPatient.email} • {selectedPatient.contactNumber}</div>
-                   
-                   <div style={{marginTop:'8px', display:'flex', gap:'8px'}}>
-                      <span style={{background:'#E1BEE7', color:'#4A148C', padding:'3px 8px', borderRadius:'12px', fontSize:'11px', fontWeight:'bold'}}>
-                         Nivel {selectedPatient.gamificationProfile?.level || 1}
-                      </span>
-                      <span style={{background:'#B3E5FC', color:'#0277BD', padding:'3px 8px', borderRadius:'12px', fontSize:'11px', fontWeight:'bold'}}>
-                         💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0}
-                      </span>
-                   </div>
-                </div>
+          )}
+
+          {/* VISTA: EQUIPO */}
+          {activeView === 'team' && (
+             <div className="nexus-card">
+                 <h2 className="text-xl font-bold text-white mb-4">Equipo Clínico Autorizado</h2>
+                 {assistants.length === 0 ? <p className="text-slate-500">No hay asistentes vinculados.</p> : (
+                     <div className="space-y-2">
+                        {assistants.map(a=>(<div key={a.uid} className="p-3 bg-slate-800 rounded text-white">{a.displayName}</div>))}
+                     </div>
+                 )}
              </div>
+          )}
 
-             {/* DASHBOARD VISUAL (Con Tags Normalizados y Carga Cognitiva) */}
-             <PatientVisualStats 
-                tasks={patientTasks} 
-                indicators={selectedPatient.clinicalIndicators?.[user.uid] || []}
-                onAddTag={handleAddIndicator}
-                onDeleteTag={handleDeleteIndicator}
-             />
+          {/* VISTA: DETALLE PACIENTE */}
+          {activeView === 'patient_detail' && selectedPatient && (
+            <div className="space-y-6 pb-20 animate-fadeIn">
+               <button onClick={() => setActiveView('patients_manage')} className="text-slate-400 hover:text-white flex items-center gap-2 mb-2 text-sm">
+                   ← Volver al directorio
+               </button>
 
-             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
-                 <h3 style={{color:'#455A64', margin:0, fontSize:'16px'}}>Plan Activo</h3>
-                 <div style={{display:'flex', gap:'10px'}}>
-                    <button onClick={() => { setTaskForHistory(null); setIsHistoryOpen(true); }} style={{padding:'8px 15px', background:'#607D8B', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', fontSize:'12px'}}>📜 Historial</button>
-                    <button onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance} style={{padding:'8px 15px', background: hasValidAttendance(selectedPatient) ? '#2196F3' : '#E0E0E0', color: hasValidAttendance(selectedPatient) ? 'white' : '#757575', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', fontSize:'12px'}}>
-                       {hasValidAttendance(selectedPatient) ? '+ Asignar' : '🔒 Asistencia'}
-                    </button>
-                 </div>
-             </div>
-
-             {/* LISTA DE TAREAS */}
-             {patientTasks.filter(t => t.status !== 'completed').length === 0 ? 
-               <div style={{textAlign:'center', padding:'30px', background:'white', borderRadius:'8px', color:'#999'}}>Sin tareas activas.</div> 
-               : (
-               <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:'15px'}}>
-                 {patientTasks.filter(t => t.status !== 'completed').map(t => {
-                    const borderColor = t.themeColor || (t.type === 'routine' ? '#9C27B0' : '#E65100');
-                    return (
-                      <div key={t.id} style={{background:'white', padding:'15px', borderRadius:'8px', borderTop:`4px solid ${borderColor}`, boxShadow:'0 2px 5px rgba(0,0,0,0.05)'}}>
-                         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px'}}>
-                            <div>
-                               <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
-                                  <span style={{fontSize:'10px', fontWeight:'bold', color: borderColor, textTransform:'uppercase'}}>
-                                     {t.type === 'routine' ? 'Rutina' : 'Misión'}
-                                  </span>
-                               </div>
-                               <div style={{fontWeight:'bold', color:'#333', fontSize:'14px', lineHeight:'1.3'}}>{t.title}</div>
-                            </div>
-                            <div style={{display:'flex', gap:'5px'}}>
-                                <button onClick={() => handleViewProgress(t)} title="Ver Bitácora" style={{border:'1px solid #BBDEFB', background:'#E3F2FD', color:'#1565C0', borderRadius:'4px', fontSize:'10px', fontWeight:'bold', padding:'4px 8px', cursor:'pointer', display:'flex', alignItems:'center', gap:'3px'}}>👁️ Bitácora</button>
-                                <button onClick={() => handleOpenEditTask(t)} style={{border:'none', background:'#F5F5F5', color:'#555', borderRadius:'4px', width:'24px', height:'24px', cursor:'pointer'}}>✏️</button>
-                                <button onClick={() => handleDeleteTask(t.id, t.type === 'routine')} style={{border:'none', background:'#FFEBEE', color:'#D32F2F', borderRadius:'4px', width:'24px', height:'24px', cursor:'pointer'}}>🗑️</button>
-                            </div>
-                         </div>
-                         <div style={{fontSize:'12px', color:'#666', marginBottom:'12px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{t.description || "Sin instrucciones."}</div>
-                         <TaskProgressBar task={t} />
+               <div className="nexus-card flex flex-col md:flex-row justify-between md:items-start gap-4">
+                  <div>
+                      <h1 className="text-2xl font-bold text-white">{selectedPatient.fullName}</h1>
+                      <div className="text-slate-400 text-sm mt-1">{selectedPatient.email} • {selectedPatient.contactNumber}</div>
+                      
+                      <div className="flex gap-2 mt-3">
+                          <span className="bg-purple-900/40 text-purple-300 border border-purple-500/30 px-3 py-1 rounded-full text-xs font-bold">
+                              Nivel {selectedPatient.gamificationProfile?.level || 1}
+                          </span>
+                          <span className="bg-blue-900/40 text-blue-300 border border-blue-500/30 px-3 py-1 rounded-full text-xs font-bold">
+                              💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0}
+                          </span>
                       </div>
-                    );
-                 })}
+                  </div>
+                  <div className="flex gap-2">
+                     <button onClick={() => { setTaskForHistory(null); setIsHistoryOpen(true); }} className="btn-secondary text-xs px-3 py-2">📜 Historial</button>
+                     <button 
+                        onClick={hasValidAttendance(selectedPatient) ? handleOpenCreateTask : handleRegisterAttendance} 
+                        className={`text-xs px-3 py-2 rounded-lg font-bold transition-all shadow-lg ${hasValidAttendance(selectedPatient) ? 'bg-nexus-cyan text-black hover:bg-cyan-300' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+                     >
+                        {hasValidAttendance(selectedPatient) ? '+ Asignar Tarea' : '🔓 Habilitar (1 Nexus)'}
+                     </button>
+                  </div>
                </div>
-             )}
 
-             <AssignmentModal isOpen={isAssignmentModalOpen} onClose={() => { setIsAssignmentModalOpen(false); setTaskToEdit(null); loadPatientTasks(selectedPatient.id); }} patientId={selectedPatient.id} professionalId={user.uid} patientName={selectedPatient.fullName} userProfessionId={profData?.professionType || 'psychologist'} taskToEdit={taskToEdit} />
-             <HistoryModal isOpen={isHistoryOpen} onClose={() => { setIsHistoryOpen(false); setTaskForHistory(null); }} patientId={selectedPatient.id} patientName={selectedPatient.fullName} specificTask={taskForHistory} />
-           </div>
-         ) : null}
-      </div>
+               <PatientVisualStats 
+                  tasks={patientTasks} 
+                  indicators={selectedPatient.clinicalIndicators?.[user.uid] || []}
+                  onAddTag={handleAddIndicator}
+                  onDeleteTag={handleDeleteIndicator}
+               />
 
+               <div className="space-y-4">
+                   <h3 className="text-lg font-bold text-white border-b border-slate-700 pb-2">Plan Activo</h3>
+                   
+                   {patientTasks.filter(t => t.status !== 'completed').length === 0 ? (
+                       <div className="text-center py-10 border-2 border-dashed border-slate-700 rounded-xl">
+                           <p className="text-slate-500">No hay tareas activas.</p>
+                           <p className="text-xs text-slate-600 mt-1">Registra asistencia para asignar nuevas misiones.</p>
+                       </div>
+                   ) : (
+                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                           {patientTasks.filter(t => t.status !== 'completed').map(t => {
+                               const isRoutine = t.type === 'routine';
+                               const borderColorClass = isRoutine ? 'border-purple-500' : 'border-orange-500';
+                               const badgeClass = isRoutine ? 'text-purple-400 bg-purple-900/20' : 'text-orange-400 bg-orange-900/20';
+
+                               return (
+                                   <div key={t.id} className={`bg-slate-800 rounded-lg p-4 shadow-lg border-t-4 ${borderColorClass} relative group`}>
+                                       <div className="flex justify-between items-start mb-2">
+                                           <div>
+                                               <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${badgeClass}`}>
+                                                   {isRoutine ? 'Rutina' : 'Misión'}
+                                               </span>
+                                               <div className="font-bold text-white mt-1 leading-tight">{t.title}</div>
+                                           </div>
+                                           <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                               <button onClick={() => handleViewProgress(t)} className="p-1.5 hover:bg-slate-700 rounded text-blue-400" title="Ver Bitácora">👁️</button>
+                                               <button onClick={() => handleOpenEditTask(t)} className="p-1.5 hover:bg-slate-700 rounded text-slate-400" title="Editar">✏️</button>
+                                               <button onClick={() => handleDeleteTask(t.id, isRoutine)} className="p-1.5 hover:bg-slate-700 rounded text-red-400" title="Eliminar">🗑️</button>
+                                           </div>
+                                       </div>
+                                       <div className="text-xs text-slate-400 mb-3 truncate">{t.description || "Sin instrucciones."}</div>
+                                       <TaskProgressBar task={t} />
+                                   </div>
+                               );
+                           })}
+                       </div>
+                   )}
+               </div>
+
+               <AssignmentModal isOpen={isAssignmentModalOpen} onClose={() => { setIsAssignmentModalOpen(false); setTaskToEdit(null); loadPatientTasks(selectedPatient.id); }} patientId={selectedPatient.id} professionalId={user.uid} patientName={selectedPatient.fullName} userProfessionId={profData?.professionType || 'psychologist'} taskToEdit={taskToEdit} />
+               <HistoryModal isOpen={isHistoryOpen} onClose={() => { setIsHistoryOpen(false); setTaskForHistory(null); }} patientId={selectedPatient.id} patientName={selectedPatient.fullName} specificTask={taskForHistory} />
+            </div>
+          )}
+
+        </div>
+      </main>
+
+      {/* MODAL DE FUSIÓN */}
       {isMergeModalOpen && patientToApprove && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
-           <div style={{ background: 'white', padding: '30px', borderRadius: '12px', width: '400px', color: '#333' }}>
-              <h3>Fusión de Expediente</h3>
-              <p>¿Fusionar a <b>{patientToApprove.fullName}</b> con un manual?</p>
-              <select value={manualIdToMerge} onChange={e=>setManualIdToMerge(e.target.value)} style={{width:'100%', marginBottom:'10px', padding:'8px', color:'#333'}}>
-                 <option value="">No, crear nuevo</option>
-                 {manualCandidates.map(c=><option key={c.id} value={c.id}>{c.fullName} (Manual)</option>)}
-              </select>
-              <button onClick={()=>handleExecuteMerge(!!manualIdToMerge)}>Confirmar</button>
+        <div className="fixed inset-0 bg-black/80 flex justify-center items-center z-[9999] p-4">
+           <div className="bg-slate-800 p-6 rounded-xl w-full max-w-md border border-slate-700 shadow-2xl animate-scaleIn">
+              <h3 className="text-xl font-bold text-white mb-2">Fusión de Expediente</h3>
+              <p className="text-slate-300 mb-4 text-sm">
+                  El usuario <b>{patientToApprove.fullName}</b> solicita acceso. 
+                  ¿Deseas vincularlo a un expediente manual existente para no perder datos previos?
+              </p>
+              
+              <div className="mb-4">
+                  <label className="text-xs text-slate-500 uppercase font-bold block mb-1">Seleccionar Expediente Manual (Opcional)</label>
+                  <select 
+                    value={manualIdToMerge} 
+                    onChange={e=>setManualIdToMerge(e.target.value)} 
+                    className="w-full p-2 bg-slate-900 border border-slate-600 rounded text-white text-sm outline-none focus:border-nexus-cyan"
+                  >
+                     <option value="">No fusionar (Crear nuevo limpio)</option>
+                     {manualCandidates.map(c=><option key={c.id} value={c.id}>{c.fullName} (Manual)</option>)}
+                  </select>
+              </div>
+
+              <div className="flex gap-3 justify-end">
+                  <button onClick={() => setIsMergeModalOpen(false)} className="px-4 py-2 text-slate-400 hover:text-white text-sm">Cancelar</button>
+                  <button onClick={()=>handleExecuteMerge(!!manualIdToMerge)} className="px-4 py-2 bg-nexus-cyan text-black font-bold rounded hover:bg-cyan-300 text-sm">
+                      {manualIdToMerge ? 'Fusionar y Aprobar' : 'Aprobar como Nuevo'}
+                  </button>
+              </div>
            </div>
         </div>
       )}
+
     </div>
   );
 }
