@@ -606,6 +606,7 @@ export default function AgendaMain({ userRole, currentUserId, doctorId, onBack }
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={() => handleQuickPay(key, slot.paymentStatus)} className={`px-2 py-1 rounded text-xs ${slot.paymentStatus === 'paid' ? 'bg-green-600' : 'bg-slate-600'}`}>$</button>
+                                <button onClick={() => handleMarkNoShow(key, slot.patientId)} className="px-2 py-1 rounded text-xs bg-orange-900/50 text-orange-300" title="Marcar No Show">NS</button>
                                 <button onClick={() => handleReopenSlot(key)} className="px-2 py-1 rounded text-xs bg-red-900/50 text-red-300">Lib</button>
                             </div>
                         </div>
