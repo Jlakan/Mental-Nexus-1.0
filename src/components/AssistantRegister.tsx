@@ -1,123 +1,172 @@
 import React, { useState } from 'react';
-import { doc, updateDoc, collection, query, where, getDocs, arrayUnion, setDoc } from "firebase/firestore";
+import { doc, setDoc, updateDoc, collection, query, where, getDocs, arrayUnion, serverTimestamp } from "firebase/firestore";
 import { auth, db } from '../services/firebase';
 
 export default function AssistantRegister() {
-  const [code, setCode] = useState('');
-  const [msg, setMsg] = useState('');
-  const [loading, setLoading] = useState(false);
+  // Estados para el perfil
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  
+  // Estado para la vinculación opcional
+  const [linkCode, setLinkCode] = useState('');
 
-  const handleLink = async (e: React.FormEvent) => {
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser) return;
     setLoading(true);
-    setMsg('Buscando profesional...');
+    setMsg('');
 
     try {
-      // 1. Buscamos al profesional por su código único
-      const q = query(collection(db, "professionals"), where("professionalCode", "==", code.trim().toUpperCase()));
-      const snap = await getDocs(q);
+      const uid = auth.currentUser.uid;
+      const email = auth.currentUser.email;
 
-      if (snap.empty) {
-        setMsg('❌ Código no encontrado o inválido.');
-        setLoading(false);
-        return;
+      // ---------------------------------------------------------
+      // PASO 1: Intentar vincular (Solo si escribió un código)
+      // ---------------------------------------------------------
+      let linkedDoctorName = null;
+      
+      if (linkCode.trim().length > 0) {
+        setMsg('Verificando código...');
+        const q = query(collection(db, "professionals"), where("professionalCode", "==", linkCode.trim().toUpperCase()));
+        const snap = await getDocs(q);
+
+        if (snap.empty) {
+          throw new Error("El código del profesional no es válido. Verifica o déjalo en blanco.");
+        }
+
+        const profDoc = snap.docs[0];
+        // Vincular al asistente en el documento del doctor
+        await updateDoc(doc(db, "professionals", profDoc.id), {
+          authorizedAssistants: arrayUnion(uid)
+        });
+        linkedDoctorName = profDoc.data().name;
       }
 
-      const profDoc = snap.docs[0];
-      const profId = profDoc.id;
-      const profData = profDoc.data();
+      // ---------------------------------------------------------
+      // PASO 2: Crear el Perfil en la colección 'assistants'
+      // ---------------------------------------------------------
+      setMsg('Creando perfil...');
+      
+      const assistantData = {
+        name: name.trim(),
+        phone: phone.trim(),
+        email: email,
+        uid: uid,
+        createdAt: serverTimestamp(),
+        // Guardamos un historial simple si se vinculó al inicio
+        initialLink: linkedDoctorName ? { doctor: linkedDoctorName, date: new Date() } : null
+      };
+
+      await setDoc(doc(db, "assistants", uid), assistantData);
 
       // ---------------------------------------------------------
-      // 🔄 CAMBIO IMPORTANTE DE ORDEN
-      // Primero preparamos todo el terreno antes de activar el rol
+      // PASO 3: Actualizar rol en 'users' (Disparador final)
       // ---------------------------------------------------------
-
-      // 2. Creamos/Actualizamos el perfil en la colección 'assistants' (Ahora va PRIMERO)
-      await setDoc(doc(db, "assistants", auth.currentUser.uid), {
-        uid: auth.currentUser.uid,
-        email: auth.currentUser.email,
-        displayName: auth.currentUser.displayName || 'Asistente',
-        linkedProfessionals: arrayUnion(profId),
-        lastUpdated: new Date()
-      }, { merge: true });
-
-      // 3. Nos agregamos a la lista del doctor
-      await updateDoc(doc(db, "professionals", profId), {
-        authorizedAssistants: arrayUnion(auth.currentUser.uid)
+      // Esto le confirma a App.tsx que el proceso terminó
+      await updateDoc(doc(db, "users", uid), {
+        role: 'assistant',
+        profileCompleted: true // Bandera útil para App.tsx
       });
 
-      setMsg(`✅ Vinculado con ${profData.fullName}. Accediendo...`);
+      setMsg('✅ ¡Perfil creado con éxito! Redirigiendo...');
+      
+      // Recarga para entrar al Panel
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
 
-      // 4. EL DISPARADOR FINAL: Cambiamos el rol en 'users'
-      // Esto hará que App.tsx detecte el cambio y redirija.
-      // Al hacerlo al final, aseguramos que los pasos 2 y 3 ya terminaron.
-      await setDoc(doc(db, "users", auth.currentUser.uid), {
-        role: 'assistant'
-      }, { merge: true });
-
-      // No necesitamos window.location.reload() si App.tsx tiene un listener,
-      // el cambio de rol hará la magia automáticamente.
-
-    } catch (e) {
-      console.error(e);
-      setMsg('❌ Error de conexión. Intenta nuevamente.');
+    } catch (error: any) {
+      console.error(error);
+      setMsg(`❌ Error: ${error.message}`);
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: '400px', margin: '50px auto', padding: '30px', textAlign: 'center', fontFamily: 'sans-serif', border: '1px solid #ddd', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)', background: 'white' }}>
-      <h2 style={{ color: '#9C27B0', marginTop: 0 }}>Soy Asistente</h2>
-      <p style={{ color: '#666', marginBottom: '25px' }}>Ingresa el código de vinculación proporcionado por el profesional para gestionar su agenda.</p>
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+      <div className="w-full max-w-md bg-slate-900 border border-purple-500/30 p-8 rounded-2xl shadow-2xl">
+        
+        <div className="text-center mb-8">
+          <div className="text-5xl mb-2">🛡️</div>
+          <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
+            Registro de Asistente
+          </h2>
+          <p className="text-slate-400 text-sm mt-2">
+            Configura tu perfil para gestionar agendas.
+          </p>
+        </div>
 
-      <form onSubmit={handleLink} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-        <input
-          value={code}
-          onChange={e => setCode(e.target.value)}
-          placeholder="CÓDIGO (Ej: A1B2C3)"
-          required
-          disabled={loading}
-          style={{
-            padding: '15px',
-            fontSize: '20px',
-            textAlign: 'center',
-            textTransform: 'uppercase',
-            letterSpacing: '3px',
-            borderRadius: '8px',
-            border: '2px solid #E1BEE7',
-            outline: 'none',
-            fontWeight: 'bold'
-          }}
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            padding: '15px',
-            background: loading ? '#ccc' : '#9C27B0',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            cursor: loading ? 'default' : 'pointer',
-            transition: 'background 0.2s'
-          }}
-        >
-          {loading ? 'Vinculando...' : 'Vincular Cuenta'}
-        </button>
-      </form>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          
+          {/* NOMBRE */}
+          <div>
+            <label className="block text-xs font-bold text-purple-300 uppercase mb-1">Nombre Completo</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Tu nombre real"
+              required
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:border-purple-500 focus:outline-none transition-colors"
+            />
+          </div>
 
-      {msg && <p style={{
-        marginTop: '20px', fontWeight: 'bold', padding: '10px', borderRadius: '4px', background: msg.includes('Error') || msg.includes('❌') ?
-          '#FFEBEE' : '#E8F5E9', color: msg.includes('Error') || msg.includes('❌') ? '#D32F2F' : '#2E7D32'
-      }}>{msg}</p>}
+          {/* CELULAR */}
+          <div>
+            <label className="block text-xs font-bold text-purple-300 uppercase mb-1">Celular / WhatsApp</label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Para notificaciones y contacto"
+              required
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:border-purple-500 focus:outline-none transition-colors"
+            />
+          </div>
 
-      <div style={{ marginTop: '30px', borderTop: '1px solid #eee', paddingTop: '15px' }}>
-        <button onClick={() => auth.signOut()} style={{ background: 'none', border: 'none', color: '#666', textDecoration: 'underline', cursor: 'pointer', fontSize: '14px' }}>
-          Cancelar y Cerrar Sesión
-        </button>
+          <div className="h-px bg-slate-700 my-4"></div>
+
+          {/* VINCULACIÓN OPCIONAL */}
+          <div className="bg-purple-900/20 p-4 rounded-lg border border-purple-500/20">
+            <label className="block text-xs font-bold text-purple-200 uppercase mb-1">
+              Vincular con Profesional (Opcional)
+            </label>
+            <p className="text-[10px] text-slate-400 mb-2">
+              Si tienes un código de doctor, ingrésalo ahora. Si no, puedes hacerlo después desde el panel.
+            </p>
+            <input
+              type="text"
+              value={linkCode}
+              onChange={(e) => setLinkCode(e.target.value)}
+              placeholder="EJ: A1B2C3"
+              maxLength={8}
+              className="w-full bg-slate-950 border border-slate-600 rounded p-2 text-center text-lg tracking-widest uppercase text-white focus:border-purple-400 focus:outline-none"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className={`w-full py-4 rounded-lg font-bold uppercase tracking-wider shadow-lg transition-all ${
+              loading 
+                ? 'bg-slate-700 text-slate-400 cursor-wait' 
+                : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white hover:scale-[1.02]'
+            }`}
+          >
+            {loading ? 'Creando Perfil...' : 'Finalizar Registro'}
+          </button>
+        </form>
+
+        {msg && (
+          <div className={`mt-6 p-3 rounded text-center text-sm font-bold ${
+            msg.includes('❌') ? 'bg-red-900/30 text-red-400' : 'bg-green-900/30 text-green-400'
+          }`}>
+            {msg}
+          </div>
+        )}
       </div>
     </div>
   );
