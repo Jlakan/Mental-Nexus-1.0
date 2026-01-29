@@ -1,22 +1,17 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   doc, getDoc, collection, query, where, getDocs,
   setDoc, updateDoc, writeBatch, arrayUnion, orderBy, deleteDoc, addDoc, serverTimestamp, deleteField, increment
 } from "firebase/firestore";
-// Ajuste de ruta: subimos dos niveles para llegar a services
-import { db } from '../../services/firebase';
+import { db } from '../../services/firebase'; 
 
-// Ajuste de ruta: subimos un nivel para componentes hermanos
-import PatientSelector from '../PatientSelector';
+// Componentes externos (mantenidos)
+import AppointmentForm from './AppointmentForm';
 import AgendaConfigModal from '../AgendaConfigModal';
 
-// Ajuste de ruta: subimos dos niveles para utils
+// Utils
 import { generateMonthSkeleton } from '../../utils/agendaGenerator';
 import type { MonthlySlotMap, WorkConfig, AgendaSlot } from '../../utils/agendaTypes';
-
-// Importamos los NUEVOS sub-componentes
-import AgendaSidebar from './AgendaSidebar';
-import AppointmentForm from './AppointmentForm';
 
 import dayjs from 'dayjs';
 import 'dayjs/locale/es';
@@ -27,6 +22,7 @@ dayjs.extend(updateLocale);
 dayjs.locale('es');
 dayjs.updateLocale('es', { weekStart: 0 });
 
+// --- INTERFACES ---
 interface Props {
   userRole: 'professional' | 'assistant';
   currentUserId: string;
@@ -48,7 +44,7 @@ interface ConflictItem {
   monthDocId: string;
 }
 
-const DAYS_HEADER = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
+// --- CONSTANTES ---
 const MONTHS_LIST = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
@@ -71,6 +67,7 @@ const DEFAULT_CONFIG: WorkConfig = {
   }
 };
 
+// --- HELPERS ---
 const getCalendarGrid = (date: Date) => {
   const year = date.getFullYear();
   const month = date.getMonth();
@@ -94,105 +91,83 @@ const getDateFromSlotKey = (slotKey: string, year: number, month: number): Date 
 };
 
 export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
-  // --- RESPONSIVE STATE ---
+  // ----------------------------------------------------------------------
+  // 1. ESTADO GLOBAL
+  // ----------------------------------------------------------------------
+  
+  // Responsive
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
-  // --- CONTEXTO ---
+  // Contexto
   const [myProfessionals, setMyProfessionals] = useState<any[]>([]);
   const [selectedProfId, setSelectedProfId] = useState<string>('');
 
-  // --- DATOS AGENDA ---
+  // Agenda Data
   const [currentMonthData, setCurrentMonthData] = useState<MonthlySlotMap | null>(null);
   const [isMonthInitialized, setIsMonthInitialized] = useState(false);
   const [patients, setPatients] = useState<any[]>([]);
-
-  // --- META MENSUAL ---
   const [monthGoal, setMonthGoal] = useState<string>('');
   const [isEditingGoal, setIsEditingGoal] = useState(false);
 
-  // --- LISTAS AUXILIARES ---
+  // Listas Auxiliares
   const [waitlist, setWaitlist] = useState<any[]>([]);
   const [patientsNeedingAppt, setPatientsNeedingAppt] = useState<any[]>([]);
   const [annualEvents, setAnnualEvents] = useState<AnnualEvent[]>([]);
+  const [pausedList, setPausedList] = useState<any[]>([]);
 
-  // --- UI STATE & CONFIG ---
+  // UI State & Config
   const [workConfig, setWorkConfig] = useState<WorkConfig>(DEFAULT_CONFIG);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
-  const [eventsTab, setEventsTab] = useState<'upcoming' | 'past'>('upcoming');
-  const [activeSidePanel, setActiveSidePanel] = useState<'none' | 'needing' | 'waitlist'>('none');
-
-  // --- NUEVOS ESTADOS: PAUSADOS ---
-  const [isPausedSidebarOpen, setIsPausedSidebarOpen] = useState(false);
-  const [pausedList, setPausedList] = useState<any[]>([]);
-
-  // --- MODALES ---
+  
+  // Modales
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isDayViewOpen, setIsDayViewOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isWaitlistFormOpen, setIsWaitlistFormOpen] = useState(false);
   const [isWaitlistSelectorOpen, setIsWaitlistSelectorOpen] = useState(false);
+  
+  // Gestión de Eventos (Restaurado)
   const [isEventsManagerOpen, setIsEventsManagerOpen] = useState(false);
   const [isNewEventModalOpen, setIsNewEventModalOpen] = useState(false);
-
-  // --- CONFLICT RESOLUTION STATE ---
-  const [conflictList, setConflictList] = useState<ConflictItem[]>([]);
-  const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
-  const [pendingEventSave, setPendingEventSave] = useState<{start: dayjs.Dayjs, end: dayjs.Dayjs, title: string, isEdit: boolean} | null>(null);
-
-  // Modal de Confirmación
-  const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({
-    isOpen: false, title: '', message: '', onConfirm: () => {}
-  });
-
-  const [slotToReassign, setSlotToReassign] = useState<string | null>(null);
-  const [targetSlotKey, setTargetSlotKey] = useState<string | null>(null);
-
-  // Edit Event State
+  const [eventsTab, setEventsTab] = useState<'upcoming' | 'past'>('upcoming');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [originalEventData, setOriginalEventData] = useState<AnnualEvent | null>(null);
   const [newEventData, setNewEventData] = useState<{start: dayjs.Dayjs, end: dayjs.Dayjs, title: string}>({
     start: dayjs(), end: dayjs(), title: ''
   });
 
-  const [formData, setFormData] = useState({
-    patientId: '',
-    patientName: '',
-    patientExternalPhone: '',
-    patientExternalEmail: '',
-    price: 500,
-    adminNotes: '',
-    paymentStatus: 'pending',
-    paymentMethod: 'cash'
-  });
+  // Conflictos (Restaurado)
+  const [conflictList, setConflictList] = useState<ConflictItem[]>([]);
+  const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
+  const [pendingEventSave, setPendingEventSave] = useState<{start: dayjs.Dayjs, end: dayjs.Dayjs, title: string, isEdit: boolean} | null>(null);
 
+  // Helpers de Cita
+  const [slotToReassign, setSlotToReassign] = useState<string | null>(null);
+  const [targetSlotKey, setTargetSlotKey] = useState<string | null>(null);
   const [savePricePreference, setSavePricePreference] = useState(false);
   const [selectedPatientNoShows, setSelectedPatientNoShows] = useState<number>(0);
+  
+  const [formData, setFormData] = useState({
+    patientId: '', patientName: '', patientExternalPhone: '', patientExternalEmail: '',
+    price: 500, adminNotes: '', paymentStatus: 'pending', paymentMethod: 'cash'
+  });
 
-  // --- DETECTOR DE MÓVIL (HOOK) ---
+  // --- EFECTOS ---
+
   useEffect(() => {
-    const handleResize = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      if (!mobile) setShowMobileSidebar(false);
-    };
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   useEffect(() => {
     if(isNewEventModalOpen && !editingEventId) {
-      setNewEventData(prev => ({
-        ...prev,
-        start: dayjs(selectedDate).startOf('month'),
-        end: dayjs(selectedDate).endOf('month'),
-        title: ''
-      }));
+      setNewEventData(prev => ({ ...prev, start: dayjs(selectedDate).startOf('month'), end: dayjs(selectedDate).endOf('month'), title: '' }));
     }
   }, [isNewEventModalOpen, editingEventId]);
 
-  // CARGA INICIAL
   useEffect(() => {
     const loadContext = async () => {
       try {
@@ -236,43 +211,12 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
         return apptDate < now;
       });
       setPatientsNeedingAppt(pending);
-      if (isPausedSidebarOpen) { fetchPausedPatients(); }
+      const paused = patients.filter(p => p.careTeam?.[selectedProfId]?.status === 'inactive');
+      setPausedList(paused);
     }
   }, [patients, selectedProfId]);
 
-  // --- LÓGICA DE DATOS ---
-
-  const fetchPausedPatients = async () => {
-      if (patients.length > 0 && selectedProfId) {
-          const paused = patients.filter(p => {
-              const teamData = p.careTeam?.[selectedProfId];
-              return teamData && teamData.status === 'inactive';
-          });
-          setPausedList(paused);
-      } else { setPausedList([]); }
-  };
-
-  const handleOpenPausedSidebar = () => {
-      setActiveSidePanel('none');
-      setIsPausedSidebarOpen(true);
-      fetchPausedPatients();
-      if (isMobile) setShowMobileSidebar(true); // Ensure menu is visible on mobile
-  };
-
-  const handleReactivatePatient = async (patientId: string, patientName: string) => {
-      if (!window.confirm(`¿Reactivar a ${patientName}?\n\nEl paciente volverá a estar activo y podrás agendarle citas.`)) return;
-      setLoading(true);
-      try {
-          const patientRef = doc(db, "patients", patientId);
-          await updateDoc(patientRef, {
-              [`careTeam.${selectedProfId}.status`]: 'active',
-              [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString()
-          });
-          alert(`✅ ${patientName} ha sido reactivado.`);
-          await loadPatients();
-          setPausedList(prev => prev.filter(p => p.id !== patientId));
-      } catch (e) { console.error("Error reactivando:", e); alert("Error al reactivar el paciente."); } finally { setLoading(false); }
-  };
+  // --- LOGICA DE DATOS ---
 
   const loadMonthDoc = async () => {
     setLoading(true);
@@ -316,52 +260,58 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
   };
 
   const loadWaitlist = async () => {
-    try {
-      const q = query(collection(db, "waitlist"), where("professionalId", "==", selectedProfId), orderBy("createdAt", "asc"));
-      const snap = await getDocs(q);
-      setWaitlist(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch (e) { console.error(e); }
+    const q = query(collection(db, "waitlist"), where("professionalId", "==", selectedProfId), orderBy("createdAt", "asc"));
+    const snap = await getDocs(q);
+    setWaitlist(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   };
 
-  const handleDeleteWaitlistItem = async (id: string) => {
-    if(!window.confirm("¿Borrar de la lista?")) return;
-    try {
-        await deleteDoc(doc(db, "waitlist", id));
-        loadWaitlist();
-    } catch(e) { console.error(e); }
-  };
-
-  const handleSaveGoal = async () => {
-    if(!selectedProfId || !isMonthInitialized) return;
+  const handleInitializeMonth = async () => {
+    if (!window.confirm(`¿Generar agenda para ${MONTHS_LIST[selectedDate.getMonth()]}?`)) return;
+    setLoading(true);
     try {
       const year = selectedDate.getFullYear();
       const month = selectedDate.getMonth();
       const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-      await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { monthGoal: monthGoal });
-      setIsEditingGoal(false);
-    } catch(e) { console.error(e); }
+      const emptySlots = generateMonthSkeleton(year, month, workConfig);
+      await setDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), {
+        id: monthDocId, professionalId: selectedProfId, year, month,
+        slots: emptySlots, createdAt: new Date(), monthGoal: ''
+      });
+      setCurrentMonthData(emptySlots); setIsMonthInitialized(true);
+    } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  const handleArchivePatient = (patientId: string, patientName: string) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Pausar Paciente',
-      message: `¿Deseas pausar el seguimiento de ${patientName}?\nDejará de aparecer en las alertas.`,
-      onConfirm: async () => {
-        setLoading(true);
-        try {
-          await updateDoc(doc(db, "patients", patientId), {
-            [`careTeam.${selectedProfId}.status`]: 'inactive',
+  const handleRegenerateMonth = async () => {
+    if (!currentMonthData) return;
+    if (!window.confirm("⚠️ ¿Actualizar horarios conservando citas existentes?")) return;
+    setLoading(true);
+    try {
+      const year = selectedDate.getFullYear();
+      const month = selectedDate.getMonth();
+      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
+      const newSkeleton = generateMonthSkeleton(year, month, workConfig);
+      const mergedSlots = { ...newSkeleton };
+      Object.entries(currentMonthData).forEach(([key, oldSlot]) => { if (oldSlot.status !== 'available') mergedSlots[key] = oldSlot; });
+      await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { slots: mergedSlots, updatedAt: new Date() });
+      setCurrentMonthData(mergedSlots);
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  };
+
+  const handleReactivatePatient = async (patientId: string, patientName: string) => {
+    if (!window.confirm(`¿Reactivar a ${patientName}?`)) return;
+    setLoading(true);
+    try {
+        await updateDoc(doc(db, "patients", patientId), {
+            [`careTeam.${selectedProfId}.status`]: 'active',
             [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString()
-          });
-          loadPatients();
-          setConfirmModal(prev => ({...prev, isOpen: false}));
-        } catch(e) { console.error(e); } finally { setLoading(false); }
-      }
-    });
+        });
+        await loadPatients();
+        setPausedList(prev => prev.filter(p => p.id !== patientId));
+    } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // --- GESTIÓN DE EVENTOS (Simplificado) ---
+  // --- LOGICA GESTIÓN DE EVENTOS (Complex Logic V1) ---
+
   const detectConflicts = async (start: dayjs.Dayjs, end: dayjs.Dayjs): Promise<ConflictItem[]> => {
     const startMs = start.toDate().getTime();
     const endMs = end.toDate().getTime();
@@ -415,10 +365,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
               hasUpdates = true;
             } else if (type === 'release' && (slot.status === 'blocked' || slot.status === 'available')) {
               updates[`slots.${key}`] = {
-                status: 'available',
-                time: slot.time,
-                duration: workConfig.durationMinutes,
-                price: workConfig.defaultPrice
+                status: 'available', time: slot.time, duration: workConfig.durationMinutes, price: workConfig.defaultPrice
               };
               hasUpdates = true;
             }
@@ -474,37 +421,18 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
         setIsConflictModalOpen(true);
         setLoading(false);
       } else {
-        setConfirmModal({
-          isOpen: true,
-          title: editingEventId ? 'Guardar Cambios' : 'Crear Evento',
-          message: `Se bloqueará la agenda del ${startD.format('DD/MM')} al ${endD.format('DD/MM')}.\n¿Continuar?`,
-          onConfirm: async () => {
-            setConfirmModal(prev => ({...prev, isOpen: false}));
-            await finalizeEventSave();
-          }
-        });
+         if(window.confirm(`Se bloqueará la agenda del ${startD.format('DD/MM')} al ${endD.format('DD/MM')}.\n¿Continuar?`)) {
+             await finalizeEventSave();
+         }
         setLoading(false);
       }
     } catch (e) { console.error(e); setLoading(false); }
   };
 
-  const handleResolveConflictToWaitlist = async (conflict: ConflictItem) => {
-    if(!window.confirm(`¿Mover a ${conflict.slotData.patientName} a lista de espera?`)) return;
-    try { alert("Movido a espera (Simulado)"); setConflictList(prev => prev.filter(c => c.slotKey !== conflict.slotKey)); } catch(e) { console.error(e); }
-  };
-
-  const handleKeepConflict = (conflict: ConflictItem) => {
-    setConflictList(prev => prev.filter(c => c.slotKey !== conflict.slotKey));
-  };
-
-  const handleDeleteEvent = (event: AnnualEvent) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Eliminar Evento',
-      message: `¿Eliminar "${event.title}" y liberar sus horarios?`,
-      onConfirm: async () => {
-        setLoading(true);
-        try {
+  const handleDeleteEvent = async (event: AnnualEvent) => {
+      if(!window.confirm(`¿Eliminar "${event.title}" y liberar sus horarios?`)) return;
+      setLoading(true);
+      try {
           const startD = dayjs(event.startDate);
           const endD = dayjs(event.endDate);
           const batch = writeBatch(db);
@@ -513,92 +441,98 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
           await batch.commit();
           loadAnnualEvents();
           loadMonthDoc();
-          setConfirmModal(prev => ({...prev, isOpen: false}));
-        } catch(e: any) { console.error(e); } finally { setLoading(false); }
-      }
-    });
+      } catch(e) { console.error(e); } finally { setLoading(false); }
   };
 
-  const openEditEvent = (event: AnnualEvent) => {
-    setEditingEventId(event.id);
-    setOriginalEventData(event);
-    setNewEventData({
-      start: dayjs(event.startDate),
-      end: dayjs(event.endDate),
-      title: event.title
-    });
-    setIsNewEventModalOpen(true);
-  };
+  // --- LOGICA DE CITAS Y EDICIÓN ---
 
-  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newMonth = parseInt(e.target.value);
-    const newDate = new Date(selectedDate);
-    newDate.setMonth(newMonth);
-    setSelectedDate(newDate);
-  };
-
-  const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newYear = parseInt(e.target.value);
-    const newDate = new Date(selectedDate);
-    newDate.setFullYear(newYear);
-    setSelectedDate(newDate);
-  };
-
-  const handlePrevMonth = () => setSelectedDate(new Date(selectedDate.setMonth(selectedDate.getMonth()-1)));
-  const handleNextMonth = () => setSelectedDate(new Date(selectedDate.setMonth(selectedDate.getMonth()+1)));
-
-  // --- ACTIONS AGENDA ---
-  const handleInitializeMonth = async () => {
-    if (!window.confirm(`¿Generar agenda para ${selectedDate.toLocaleDateString('es-ES', {month:'long'})}?`)) return;
+  const handleSaveAppointment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetSlotKey || !currentMonthData || !formData.patientName) return alert("Datos incompletos.");
     setLoading(true);
-    try {
-      const year = selectedDate.getFullYear();
-      const month = selectedDate.getMonth();
-      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-      const emptySlots = generateMonthSkeleton(year, month, workConfig);
-      await setDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), {
-        id: monthDocId, professionalId: selectedProfId, year, month,
-        slots: emptySlots, createdAt: new Date(), monthGoal: ''
-      });
-      setCurrentMonthData(emptySlots); setMonthGoal(''); setIsMonthInitialized(true);
-    } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
-  const handleRegenerateMonth = async () => {
-    if (!currentMonthData) return;
-    if (!window.confirm("⚠️ ¿Actualizar horarios conservando citas existentes?")) return;
-    setLoading(true);
-    try {
-      const year = selectedDate.getFullYear();
-      const month = selectedDate.getMonth();
-      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-      const newSkeleton = generateMonthSkeleton(year, month, workConfig);
-      const mergedSlots = { ...newSkeleton };
-      Object.entries(currentMonthData).forEach(([key, oldSlot]) => { if (oldSlot.status !== 'available') mergedSlots[key] = oldSlot; });
-      await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { slots: mergedSlots, updatedAt: new Date() });
-      setCurrentMonthData(mergedSlots);
-    } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
-  const handleSaveConfig = async (newConfig: WorkConfig) => {
-    setLoading(true);
-    try {
-      await updateDoc(doc(db, "professionals", selectedProfId), { agendaSettings: newConfig });
-      setWorkConfig(newConfig); setIsConfigOpen(false); alert("Configuración guardada.");
-    } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
-  const handleAddExtraSlot = async () => {
-    const timeStr = window.prompt("Hora del turno extra (HH:MM):", "18:00"); if (!timeStr) return;
-    const [h, m] = timeStr.split(':').map(Number);
-    const day = selectedDate.getDate();
-    const slotKey = `${day.toString().padStart(2,'0')}_${h.toString().padStart(2,'0')}${m.toString().padStart(2,'0')}`;
-    if (currentMonthData && currentMonthData[slotKey]) return alert("Ya existe ese turno.");
     try {
       const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
       const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-      const newSlot: AgendaSlot = { status: 'available', time: `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`, price: workConfig.defaultPrice, duration: workConfig.durationMinutes };
-      await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotKey}`]: newSlot });
-      setCurrentMonthData({ ...currentMonthData, [slotKey]: newSlot });
-    } catch (e) { console.error(e); }
+      const batch = writeBatch(db);
+      let finalPatientId = formData.patientId;
+
+      if (!finalPatientId && formData.patientName) {
+        const newPatRef = doc(collection(db, "patients")); finalPatientId = newPatRef.id;
+        batch.set(newPatRef, {
+          fullName: formData.patientName, contactNumber: formData.patientExternalPhone || '', email: formData.patientExternalEmail || '', isManual: true, linkedProfessionalId: selectedProfId, createdAt: serverTimestamp(),
+          careTeam: { [selectedProfId]: { status: 'active', joinedAt: new Date().toISOString(), customPrice: savePricePreference ? Number(formData.price) : null } }
+        });
+      }
+      
+      const slotPayload: Partial<AgendaSlot> = { 
+        status: 'booked', patientId: finalPatientId, patientName: formData.patientName, 
+        price: Number(formData.price), adminNotes: formData.adminNotes, paymentStatus: formData.paymentStatus as any, updatedAt: new Date().toISOString() 
+      };
+      const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
+      batch.update(agendaRef, { [`slots.${targetSlotKey}`]: { ...currentMonthData[targetSlotKey], ...slotPayload } });
+
+      if (finalPatientId) {
+        const appointmentDate = getDateFromSlotKey(targetSlotKey, year, month);
+        batch.update(doc(db, "patients", finalPatientId), { [`careTeam.${selectedProfId}.nextAppointment`]: appointmentDate.toISOString(), [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString() });
+        batch.set(doc(db, "patients", finalPatientId, "gamification", "history"), { lastUpdate: new Date(), appointments: arrayUnion({ date: appointmentDate.toISOString(), slotKey: targetSlotKey, professionalId: selectedProfId, status: 'booked' }) }, { merge: true });
+      }
+      await batch.commit();
+      setCurrentMonthData({ ...currentMonthData, [targetSlotKey]: { ...currentMonthData[targetSlotKey], ...slotPayload as AgendaSlot } });
+      loadPatients(); setIsFormOpen(false); setTargetSlotKey(null);
+    } catch (e) { console.error(e); alert("Error al guardar."); } finally { setLoading(false); }
   };
+
+  const handleQuickPay = async (slotKey: string, currentStatus: string | undefined) => {
+    const newStatus = currentStatus === 'paid' ? 'pending' : 'paid';
+    setLoading(true);
+    try {
+      const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
+      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
+      await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotKey}.paymentStatus`]: newStatus });
+      if (currentMonthData) setCurrentMonthData({ ...currentMonthData, [slotKey]: { ...currentMonthData[slotKey], paymentStatus: newStatus as any } });
+    } catch(e) { console.error(e); } finally { setLoading(false); }
+  };
+
+  const handleMarkNoShow = async (slotKey: string, patientId: string | undefined) => {
+    if (!window.confirm("¿Marcar NO SHOW?")) return;
+    setLoading(true);
+    try {
+      const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
+      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
+      const batch = writeBatch(db);
+      const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
+      batch.update(agendaRef, { [`slots.${slotKey}.status`]: 'cancelled', [`slots.${slotKey}.adminNotes`]: '[AUSENCIA] El paciente no se presentó.', [`slots.${slotKey}.paymentStatus`]: deleteField() });
+      if (patientId) {
+        const patRef = doc(db, "patients", patientId);
+        batch.update(patRef, { [`careTeam.${selectedProfId}.noShowCount`]: increment(1) });
+      }
+      await batch.commit();
+      if (currentMonthData) { setCurrentMonthData({ ...currentMonthData, [slotKey]: { ...currentMonthData[slotKey], status: 'cancelled', adminNotes: '[AUSENCIA] El paciente no se presentó.' } as any }); }
+      loadPatients();
+    } catch(e) { console.error(e); } finally { setLoading(false); }
+  };
+
+  const handleReopenSlot = async (slotKey: string) => {
+    if (!window.confirm("¿Reabrir este horario?")) return; 
+    setLoading(true);
+    try { 
+        const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
+        const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; 
+        const originalTime = currentMonthData![slotKey].time; 
+        const cleanSlotLocal: AgendaSlot = { status: 'available', time: originalTime, duration: workConfig.durationMinutes, price: workConfig.defaultPrice };
+        const batch = writeBatch(db); 
+        const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
+        batch.update(agendaRef, { 
+            [`slots.${slotKey}.status`]: 'available', [`slots.${slotKey}.price`]: workConfig.defaultPrice, [`slots.${slotKey}.duration`]: workConfig.durationMinutes, 
+            [`slots.${slotKey}.patientId`]: deleteField(), [`slots.${slotKey}.patientName`]: deleteField(), [`slots.${slotKey}.paymentStatus`]: deleteField() 
+        });
+        if (currentMonthData![slotKey].patientId) { batch.update(doc(db, "patients", currentMonthData![slotKey].patientId!), { [`careTeam.${selectedProfId}.nextAppointment`]: null }); } 
+        await batch.commit();
+        setCurrentMonthData({ ...currentMonthData!, [slotKey]: cleanSlotLocal }); 
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  };
+
+  // --- LOGICA DAY VIEW EXTRA ---
   const handleBlockDay = async () => {
     const reason = window.prompt("Motivo del bloqueo:"); if (!reason) return;
     if (!window.confirm("¿Bloquear día completo?")) return;
@@ -619,154 +553,32 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  const handlePatientSelect = (id: string, name: string) => {
-    const fullPatient = patients.find(p => p.id === id);
-    let detectedPrice = workConfig.defaultPrice;
-    let noShowCount = 0;
-    if (fullPatient && fullPatient.careTeam && fullPatient.careTeam[selectedProfId]) {
-      const teamData = fullPatient.careTeam[selectedProfId];
-      if (teamData.customPrice) detectedPrice = teamData.customPrice;
-      if (teamData.noShowCount) noShowCount = teamData.noShowCount;
-    }
-    setFormData({ ...formData, patientId: id, patientName: name, price: detectedPrice });
-    setSelectedPatientNoShows(noShowCount);
-  };
-
-  const handleQuickPay = async (slotKey: string, currentStatus: string | undefined) => {
-    const newStatus = currentStatus === 'paid' ? 'pending' : 'paid';
-    if (currentStatus === 'paid' && !window.confirm("¿Marcar como NO PAGADO?")) return;
-    setLoading(true);
-    try {
-      const year = selectedDate.getFullYear();
-      const month = selectedDate.getMonth();
-      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-      await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotKey}.paymentStatus`]: newStatus });
-      if (currentMonthData) {
-        const updatedSlots = { ...currentMonthData };
-        updatedSlots[slotKey] = { ...updatedSlots[slotKey], paymentStatus: newStatus as any };
-        setCurrentMonthData(updatedSlots);
-      }
-    } catch(e) { console.error(e); } finally { setLoading(false); }
-  };
-
-  const handleMarkNoShow = async (slotKey: string, patientId: string | undefined) => {
-    if (!window.confirm("¿Marcar NO SHOW?")) return;
-    setLoading(true);
+  const handleAddExtraSlot = async () => {
+    const timeStr = window.prompt("Hora del turno extra (HH:MM):", "18:00"); if (!timeStr) return;
+    const [h, m] = timeStr.split(':').map(Number);
+    const day = selectedDate.getDate();
+    const slotKey = `${day.toString().padStart(2,'0')}_${h.toString().padStart(2,'0')}${m.toString().padStart(2,'0')}`;
+    if (currentMonthData && currentMonthData[slotKey]) return alert("Ya existe ese turno.");
     try {
       const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
       const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-      const batch = writeBatch(db);
-      const slotPayload = { status: 'cancelled', adminNotes: '[AUSENCIA] El paciente no se presentó.', updatedAt: new Date().toISOString() };
-      const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
-      batch.update(agendaRef, { [`slots.${slotKey}.status`]: 'cancelled', [`slots.${slotKey}.adminNotes`]: slotPayload.adminNotes, [`slots.${slotKey}.updatedAt`]: slotPayload.updatedAt });
-      if (patientId) {
-        const patRef = doc(db, "patients", patientId);
-        batch.update(patRef, { [`careTeam.${selectedProfId}.noShowCount`]: increment(1), [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString() });
-      }
-      await batch.commit();
-      if (currentMonthData) {
-        const updatedSlots = { ...currentMonthData };
-        updatedSlots[slotKey] = { ...updatedSlots[slotKey], ...slotPayload as any };
-        setCurrentMonthData(updatedSlots);
-      }
-      loadPatients();
-    } catch(e) { console.error(e); } finally { setLoading(false); }
+      const newSlot: AgendaSlot = { status: 'available', time: `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`, price: workConfig.defaultPrice, duration: workConfig.durationMinutes };
+      await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotKey}`]: newSlot });
+      setCurrentMonthData({ ...currentMonthData, [slotKey]: newSlot });
+    } catch (e) { console.error(e); }
   };
 
-  const handleSaveAppointment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!targetSlotKey || !currentMonthData || !formData.patientName) return alert("Datos incompletos.");
-    setLoading(true);
-    try {
-      const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
-      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-      const batch = writeBatch(db);
-      let finalPatientId = formData.patientId;
-
-      if (!finalPatientId && formData.patientName) {
-        const newPatRef = doc(collection(db, "patients")); finalPatientId = newPatRef.id;
-        batch.set(newPatRef, {
-          fullName: formData.patientName, contactNumber: formData.patientExternalPhone || '', email: formData.patientExternalEmail || '', isManual: true, linkedProfessionalId: selectedProfId, createdAt: serverTimestamp(),
-          careTeam: { [selectedProfId]: { status: 'active', joinedAt: new Date().toISOString(), customPrice: savePricePreference ? Number(formData.price) : null } }
-        });
-      } else if (finalPatientId && savePricePreference) {
-        batch.update(doc(db, "patients", finalPatientId), { [`careTeam.${selectedProfId}.customPrice`]: Number(formData.price) });
-      }
-
-      const slotPayload: Partial<AgendaSlot> = { status: 'booked', patientId: finalPatientId, patientName: formData.patientName, price: Number(formData.price), adminNotes: formData.adminNotes, paymentStatus: formData.paymentStatus as any, updatedAt: new Date().toISOString() };
-      const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
-      batch.update(agendaRef, { [`slots.${targetSlotKey}`]: { ...currentMonthData[targetSlotKey], ...slotPayload } });
-
-      if (finalPatientId) {
-        const appointmentDate = getDateFromSlotKey(targetSlotKey, year, month);
-        batch.update(doc(db, "patients", finalPatientId), { [`careTeam.${selectedProfId}.nextAppointment`]: appointmentDate.toISOString(), [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString() });
-        batch.set(doc(db, "patients", finalPatientId, "gamification", "history"), { lastUpdate: new Date(), appointments: arrayUnion({ date: appointmentDate.toISOString(), slotKey: targetSlotKey, professionalId: selectedProfId, status: 'booked' }) }, { merge: true });
-      }
-      await batch.commit();
-      setCurrentMonthData({ ...currentMonthData, [targetSlotKey]: { ...currentMonthData[targetSlotKey], ...slotPayload as AgendaSlot } });
-      loadPatients(); setIsFormOpen(false); setSavePricePreference(false); setSelectedPatientNoShows(0);
-    } catch (e) { console.error(e); alert("Error al guardar."); } finally { setLoading(false); }
-  };
-
-  const handleSoftCancel = async (slotKey: string) => {
-    const reason = window.prompt("¿Motivo de cancelación?", "Cancelación del paciente"); if (reason === null) return;
-    setLoading(true); try { const year = selectedDate.getFullYear(); const month = selectedDate.getMonth(); const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-    const slotPayload = { status: 'cancelled', adminNotes: `[CANCELADO] ${reason}`, updatedAt: new Date().toISOString() };
-    await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotKey}.status`]: 'cancelled', [`slots.${slotKey}.adminNotes`]: slotPayload.adminNotes });
-    setCurrentMonthData({ ...currentMonthData!, [slotKey]: { ...currentMonthData![slotKey], ...slotPayload } as any }); } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
-  const handleReopenSlot = async (slotKey: string) => {
-    if (!window.confirm("¿Reabrir este horario?")) return; setLoading(true); try { const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
-    const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; const originalTime = currentMonthData![slotKey].time; const cleanSlotLocal: AgendaSlot = { status: 'available', time: originalTime, duration: workConfig.durationMinutes, price: workConfig.defaultPrice };
-    const batch = writeBatch(db); const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
-    batch.update(agendaRef, { [`slots.${slotKey}.status`]: 'available', [`slots.${slotKey}.price`]: workConfig.defaultPrice, [`slots.${slotKey}.duration`]: workConfig.durationMinutes, [`slots.${slotKey}.patientId`]: deleteField(), [`slots.${slotKey}.patientName`]: deleteField(), [`slots.${slotKey}.patientExternalPhone`]: deleteField(), [`slots.${slotKey}.patientExternalEmail`]: deleteField(), [`slots.${slotKey}.adminNotes`]: deleteField(), [`slots.${slotKey}.paymentStatus`]: deleteField() });
-    if (currentMonthData![slotKey].patientId) { batch.update(doc(db, "patients", currentMonthData![slotKey].patientId!), { [`careTeam.${selectedProfId}.nextAppointment`]: null }); } await batch.commit();
-    setCurrentMonthData({ ...currentMonthData!, [slotKey]: cleanSlotLocal }); } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
-  const handleSmartReleaseCheck = async (slotKey: string) => {
-    if (waitlist.length > 0) { if (window.confirm(`⚠️ Hay ${waitlist.length} personas en espera. ¿ASIGNAR espacio a la lista?`)) { setSlotToReassign(slotKey); setIsWaitlistSelectorOpen(true); return; } }
-    if(window.confirm("¿CANCELAR la cita actual?")) { handleSoftCancel(slotKey); }
-  };
-  const handleAssignFromWaitlist = async (waitlistItem: any) => { if (!slotToReassign || !currentMonthData) return; setLoading(true); try { const year = selectedDate.getFullYear();
-  const month = selectedDate.getMonth(); const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; const batch = writeBatch(db);
-  const slotPayload: Partial<AgendaSlot> = { status: 'booked', patientId: waitlistItem.patientId || undefined, patientName: waitlistItem.patientName, patientExternalPhone: waitlistItem.patientExternalPhone, adminNotes: `[Desde Espera] ${waitlistItem.notes || ''}`, paymentStatus: 'pending', updatedAt: new Date().toISOString() };
-  batch.update(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotToReassign}`]: { ...currentMonthData[slotToReassign], ...slotPayload } });
-  if (waitlistItem.patientId) { const apptDate = getDateFromSlotKey(slotToReassign, year, month); batch.update(doc(db, "patients", waitlistItem.patientId), { [`careTeam.${selectedProfId}.nextAppointment`]: apptDate.toISOString() }); } batch.delete(doc(db, "waitlist", waitlistItem.id));
-  await batch.commit(); setCurrentMonthData({ ...currentMonthData, [slotToReassign]: { ...currentMonthData[slotToReassign], ...slotPayload as AgendaSlot } }); loadWaitlist(); loadPatients(); setIsWaitlistSelectorOpen(false); setSlotToReassign(null);
-  alert( `✅ Reasignado a ${waitlistItem.patientName}`); } catch (e) { console.error(e); } finally { setLoading(false); } };
-
-  const handleAddToWaitlist = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!formData.patientName) return alert("Nombre requerido"); setLoading(true); try {
-    await addDoc(collection(db, "waitlist"), { professionalId: selectedProfId, patientId: formData.patientId || null, patientName: formData.patientName, notes: formData.adminNotes, createdAt: serverTimestamp() });
-    alert("Agregado a lista de espera."); setIsWaitlistFormOpen(false); loadWaitlist(); } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
-
-  const openForm = (slotKey: string, slot: AgendaSlot) => {
-    setTargetSlotKey(slotKey);
-    setFormData({ patientId: slot.patientId || '', patientName: slot.patientName || (slot.status === 'blocked' ? 'BLOQUEADO' : ''), patientExternalPhone: slot.patientExternalPhone || '', patientExternalEmail: slot.patientExternalEmail || '', price: slot.price, adminNotes: slot.adminNotes || '', paymentStatus: slot.paymentStatus || 'pending', paymentMethod: slot.paymentMethod || 'cash' });
-    setSavePricePreference(false); setSelectedPatientNoShows(0); setIsFormOpen(true);
-  };
-
-  const handleScheduleNeedingPatient = (p: any) => {
-    let price = workConfig.defaultPrice; let ns = 0;
-    if (p.careTeam?.[selectedProfId]?.customPrice) price = p.careTeam[selectedProfId].customPrice;
-    if (p.careTeam?.[selectedProfId]?.noShowCount) ns = p.careTeam[selectedProfId].noShowCount;
-    setFormData({ patientId: p.id, patientName: p.fullName, patientExternalPhone: p.contactNumber || '', patientExternalEmail: p.email || '', price: price, adminNotes: '', paymentStatus: 'pending', paymentMethod: 'cash' });
-    setSelectedPatientNoShows(ns);
-    alert(`Has seleccionado a ${p.fullName}. Click en un espacio disponible.`);
-    if (isMobile) setShowMobileSidebar(false); // Close menu on mobile after selection
-  };
-
+  // --- RENDER HELPERS ---
   const DateSelectorRow = ({ label, dateValue, onChange }: { label: string, dateValue: dayjs.Dayjs, onChange: (d: dayjs.Dayjs) => void }) => {
     const daysInMonth = dateValue.daysInMonth();
     const days = Array.from({length: daysInMonth}, (_, i) => i + 1);
     return (
-      <div style={{marginBottom:'10px'}}>
-        <label style={{display:'block', fontSize:'12px', color:'#666', marginBottom:'2px'}}>{label}</label>
-        <div style={{display:'flex', gap:'5px'}}>
-          <select value={dateValue.date()} onChange={(e) => onChange(dateValue.date(parseInt(e.target.value)))} style={{padding:'5px', borderRadius:'4px', border:'1px solid #ccc', flex:1}}>{days.map(d => <option key={d} value={d}>{d}</option>)}</select>
-          <select value={dateValue.month()} onChange={(e) => onChange(dateValue.month(parseInt(e.target.value)))} style={{padding:'5px', borderRadius:'4px', border:'1px solid #ccc', flex:2}}>{MONTHS_LIST.map((m, i) => <option key={i} value={i}>{m}</option>)}</select>
-          <select value={dateValue.year()} onChange={(e) => onChange(dateValue.year(parseInt(e.target.value)))} style={{padding:'5px', borderRadius:'4px', border:'1px solid #ccc', flex:1}}>{YEARS_LIST.map(y => <option key={y} value={y}>{y}</option>)}</select>
+      <div className="mb-4">
+        <label className="block text-xs text-slate-400 mb-1">{label}</label>
+        <div className="flex gap-2">
+          <select value={dateValue.date()} onChange={(e) => onChange(dateValue.date(parseInt(e.target.value)))} className="bg-slate-800 border border-slate-700 text-white rounded p-1 flex-1">{days.map(d => <option key={d} value={d}>{d}</option>)}</select>
+          <select value={dateValue.month()} onChange={(e) => onChange(dateValue.month(parseInt(e.target.value)))} className="bg-slate-800 border border-slate-700 text-white rounded p-1 flex-[2]">{MONTHS_LIST.map((m, i) => <option key={i} value={i}>{m}</option>)}</select>
+          <select value={dateValue.year()} onChange={(e) => onChange(dateValue.year(parseInt(e.target.value)))} className="bg-slate-800 border border-slate-700 text-white rounded p-1 flex-1">{YEARS_LIST.map(y => <option key={y} value={y}>{y}</option>)}</select>
         </div>
       </div>
     );
@@ -776,270 +588,330 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
     if (!currentMonthData) return <div>Cargando...</div>;
     const dayStr = selectedDate.getDate().toString().padStart(2, '0');
     const daySlots = Object.entries(currentMonthData).filter(([k]) => k.startsWith(`${dayStr}_`)).sort((a, b) => a[0].localeCompare(b[0]));
-    if (daySlots.length === 0) return ( <div style={{padding:'20px', textAlign:'center', color:'#777'}}> <p>No hay turnos hoy.</p> <button onClick={handleAddExtraSlot} style={{background:'#2196F3', color:'white', border:'none', padding:'8px', borderRadius:'4px', cursor:'pointer'}}>+ Agregar Turno</button> </div> );
+    if (daySlots.length === 0) return <div className="p-8 text-center text-slate-500">No hay turnos hoy.</div>;
     return (
-      <div>
-        {daySlots.map(([key, slot]) => {
-          const [dStr, tStr] = key.split('_'); const sH = parseInt(tStr.substring(0, 2)); const sM = parseInt(tStr.substring(2));
-          const slotDateObj = dayjs(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), parseInt(dStr), sH, sM));
-          const isPast = slotDateObj.isBefore(dayjs());
-
-          return (
-            <div key={key} style={{borderBottom:'1px solid #eee', padding:'12px', display:'flex', alignItems:'center', gap:'15px'}}>
-              <div style={{fontWeight:'bold', color:'#555', minWidth:'50px'}}>{slot.time}</div>
-              <div style={{flex:1}}>
-                {slot.status === 'available' ? (
-                  <div onClick={() => { if (isPast) { alert("Fecha pasada."); return; } if (formData.patientId && formData.patientName) { setTargetSlotKey(key); setIsFormOpen(true); } else { openForm(key, slot); } }}
-                    style={{ background: isPast ? '#f5f5f5' : '#F1F8E9', color: isPast ? '#aaa' : '#4CAF50', border: isPast ? '1px solid #ddd' : '1px dashed #4CAF50', padding:'8px', borderRadius:'6px', textAlign:'center', cursor: isPast ? 'not-allowed' : 'pointer' }}
-                  > {isPast ? 'Tiempo transcurrido' : `+ Disponible ${formData.patientId && formData.patientName ? `(Agendar a ${formData.patientName})` : ''}`} </div>
-                ) : slot.status === 'blocked' ? (
-                  <div onClick={() => handleReopenSlot(key)} style={{background:'#FFEBEE', color:'#D32F2F', padding:'10px', borderRadius:'6px', display:'flex', justifyContent:'space-between', cursor:'pointer'}}> <span>🚫 {slot.adminNotes}</span><span> ✕ </span> </div>
-                ) : slot.status === 'cancelled' ? (
-                  <div style={{background: '#f5f5f5', border: '1px solid #ccc', color: '#777', padding: '10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                    <div> <div style={{textDecoration: 'line-through', fontWeight: 'bold'}}>{slot.patientName}</div> <div style={{fontSize: '11px', fontStyle: 'italic', color: slot.adminNotes?.includes('AUSENCIA') ? '#D32F2F' : '#666'}}> {slot.adminNotes} </div> </div>
-                    <button onClick={() => handleReopenSlot(key)} style={{background: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold'}}>↻ Reabrir</button>
-                  </div>
-                ) : (
-                  <div onClick={() => openForm(key, slot)} style={{background: slot.paymentStatus==='paid'?'#E8F5E9':'#E3F2FD', borderLeft:`4px solid ${slot.paymentStatus==='paid'?'#4CAF50':'#2196F3'}`, padding:'10px', borderRadius:'6px', position:'relative', cursor:'pointer'}}>
-                    <div style={{fontWeight:'bold', paddingRight:'65px'}}>{slot.patientName}</div> <div style={{fontSize:'12px', color:'#666'}}>{slot.adminNotes || 'Sin notas'}</div> <div style={{fontSize:'10px', fontWeight:'bold', marginTop:'3px', color:'#1565C0'}}>${slot.price}</div>
-                    <div onClick={(e) => { e.stopPropagation(); handleQuickPay(key, slot.paymentStatus); }} style={{ position:'absolute', right:'40px', top:'10px', width:'24px', height:'24px', borderRadius:'50%', background: slot.paymentStatus === 'paid' ? '#4CAF50' : '#E0E0E0', color: slot.paymentStatus === 'paid' ? 'white' : '#757575', display:'flex', justifyContent:'center', alignItems:'center', fontWeight:'bold', fontSize:'12px', border: '1px solid #ccc', zIndex:5 }}> $ </div>
-                    <button onClick={(e) => { e.stopPropagation(); handleMarkNoShow(key, slot.patientId); }} style={{ position:'absolute', right:'70px', top:'10px', width:'24px', height:'24px', borderRadius:'50%', background:'#FFEBEE', color:'#D32F2F', border:'1px solid #FFCDD2', display:'flex', justifyContent:'center', alignItems:'center', cursor:'pointer', fontSize:'12px', zIndex:5 }}> 🚫 </button>
-                    <button onClick={(e)=>{e.stopPropagation(); handleSmartReleaseCheck(key)}} style={{position:'absolute', right:'10px', top:'10px', border:'none', background:'none', color:'#D32F2F', cursor:'pointer', fontSize:'16px'}}>🗑</button>
-                  </div>
-                )}
-              </div>
+      <div className="space-y-2">
+        {daySlots.map(([key, slot]) => (
+            <div key={key} className="flex items-center gap-3 p-3 bg-slate-800 rounded border border-slate-700">
+                <div className="font-bold text-cyan-400 w-12">{slot.time}</div>
+                <div className="flex-1">
+                    {slot.status === 'booked' ? (
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <div className="font-bold text-white">{slot.patientName}</div>
+                                <div className="text-xs text-slate-400">{slot.adminNotes}</div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => handleQuickPay(key, slot.paymentStatus)} className={`px-2 py-1 rounded text-xs ${slot.paymentStatus === 'paid' ? 'bg-green-600' : 'bg-slate-600'}`}>$</button>
+                                <button onClick={() => handleReopenSlot(key)} className="px-2 py-1 rounded text-xs bg-red-900/50 text-red-300">Lib</button>
+                            </div>
+                        </div>
+                    ) : slot.status === 'blocked' ? (
+                        <div className="flex justify-between items-center text-red-400 bg-red-900/20 p-2 rounded">
+                            <span>🚫 {slot.adminNotes}</span>
+                            <button onClick={() => handleReopenSlot(key)} className="text-xs border border-red-500 rounded px-2">X</button>
+                        </div>
+                    ) : (
+                        <div onClick={() => handleOpenForm(key, slot)} className="text-green-400 cursor-pointer hover:underline">+ Disponible</div>
+                    )}
+                </div>
             </div>
-          )
-        })}
+        ))}
       </div>
     );
   };
 
+  const handleOpenForm = (slotKey: string, slot: any) => {
+      setTargetSlotKey(slotKey);
+      setFormData({
+          patientId: slot.patientId || '', patientName: slot.patientName || '',
+          patientExternalPhone: slot.patientExternalPhone || '', patientExternalEmail: slot.patientExternalEmail || '',
+          price: slot.price || workConfig.defaultPrice, adminNotes: slot.adminNotes || '',
+          paymentStatus: slot.paymentStatus || 'pending', paymentMethod: slot.paymentMethod || 'cash'
+      });
+      setIsFormOpen(true);
+  };
+
+  const handleAssignFromWaitlist = async (waitlistItem: any) => {
+    if (!slotToReassign || !currentMonthData) return;
+    setLoading(true);
+    try {
+      const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
+      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
+      const batch = writeBatch(db);
+      
+      const slotPayload: Partial<AgendaSlot> = { 
+        status: 'booked', patientId: waitlistItem.patientId || undefined, patientName: waitlistItem.patientName, 
+        adminNotes: `[Desde Espera] ${waitlistItem.notes || ''}`, paymentStatus: 'pending', updatedAt: new Date().toISOString() 
+      };
+      
+      batch.update(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotToReassign}`]: { ...currentMonthData[slotToReassign], ...slotPayload } });
+      if (waitlistItem.patientId) { 
+        const apptDate = getDateFromSlotKey(slotToReassign, year, month); 
+        batch.update(doc(db, "patients", waitlistItem.patientId), { [`careTeam.${selectedProfId}.nextAppointment`]: apptDate.toISOString() }); 
+      }
+      batch.delete(doc(db, "waitlist", waitlistItem.id));
+      await batch.commit();
+      
+      setCurrentMonthData({ ...currentMonthData, [slotToReassign]: { ...currentMonthData[slotToReassign], ...slotPayload as AgendaSlot } });
+      loadWaitlist(); loadPatients(); setIsWaitlistSelectorOpen(false); setSlotToReassign(null);
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  };
+
+  // ----------------------------------------------------------------------
+  // RENDER PRINCIPAL
+  // ----------------------------------------------------------------------
+
   const calendarDays = getCalendarGrid(selectedDate);
-  if (loading && !currentMonthData && !isMonthInitialized) return <div style={{padding:'50px', textAlign:'center'}}>Cargando...</div>;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', fontFamily: 'sans-serif', background:'#f5f5f5', overflow:'hidden', position: 'relative' }}>
-
-      {/* --- SIDEBAR COMPONETIZADO (MÓVIL FRIENDLY) --- */}
-      <div style={{
-          position: isMobile ? 'absolute' : 'relative',
-          zIndex: 99,
-          height: '100%',
-          background: 'white',
-          width: isMobile ? '280px' : 'auto',
-          transform: isMobile ? (showMobileSidebar ? 'translateX(0)' : 'translateX(-100%)') : 'none',
-          transition: 'transform 0.3s ease',
-          boxShadow: showMobileSidebar ? '2px 0 10px rgba(0,0,0,0.2)' : 'none'
-      }}>
-        <AgendaSidebar
-          onBack={onBack}
-          onOpenConfig={() => setIsConfigOpen(true)}
-          onOpenEvents={() => setIsEventsManagerOpen(true)}
-          isMonthInitialized={isMonthInitialized}
-          onRegenerate={handleRegenerateMonth}
-          onInitialize={handleInitializeMonth}
-          activeSidePanel={activeSidePanel}
-          setActiveSidePanel={setActiveSidePanel}
-          isPausedSidebarOpen={isPausedSidebarOpen}
-          setIsPausedSidebarOpen={setIsPausedSidebarOpen}
-          patientsNeedingAppt={patientsNeedingAppt}
-          waitlist={waitlist}
-          pausedList={pausedList}
-          onOpenPausedSidebar={handleOpenPausedSidebar}
-          onScheduleNeeding={handleScheduleNeedingPatient}
-          onArchivePatient={handleArchivePatient}
-          onAddWaitlist={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true); }}
-          onDeleteWaitlist={handleDeleteWaitlistItem}
-          onReactivatePatient={handleReactivatePatient}
-        />
-        {/* Botón cerrar sidebar en móvil */}
-        {isMobile && showMobileSidebar && (
-           <button 
-             onClick={() => setShowMobileSidebar(false)}
-             style={{
-               position:'absolute', top:'10px', right:'10px', 
-               background:'#f5f5f5', border:'1px solid #ccc', borderRadius:'4px', padding:'5px'
-             }}
-           >
-             ✕
-           </button>
-        )}
-      </div>
-
-      {/* OVERLAY PARA CERRAR EN MÓVIL AL TOCAR AFUERA */}
-      {isMobile && showMobileSidebar && (
-        <div 
-          onClick={() => setShowMobileSidebar(false)}
-          style={{position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 90}}
-        />
-      )}
-
-      {/* --- ÁREA PRINCIPAL (CALENDARIO) --- */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position:'relative', minWidth: 0 }}>
-        
-        {/* HEADER MORADO CON BOTÓN DE MENÚ */}
-        <div style={{background: '#673AB7', color: 'white', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)'}}>
-          
-          {/* BOTÓN HAMBURGUESA (SOLO MÓVIL) */}
-          {isMobile && (
-            <button 
-              onClick={() => setShowMobileSidebar(true)}
-              style={{background:'none', border:'none', color:'white', fontSize:'20px', cursor:'pointer', marginRight:'5px'}}
-            >
-              ☰
-            </button>
+    <div className="flex flex-col h-screen bg-slate-900 text-slate-100 font-sans overflow-hidden">
+      
+      {/* HEADER */}
+      <header className="h-16 flex items-center justify-between px-6 bg-slate-800/50 border-b border-slate-700 backdrop-blur-sm z-20">
+        <div className="flex items-center gap-4">
+          {onBack && <button onClick={onBack} className="text-slate-400 hover:text-white">⬅</button>}
+          <h2 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-400 uppercase">
+            {MONTHS_LIST[selectedDate.getMonth()]} {selectedDate.getFullYear()}
+          </h2>
+          {isMonthInitialized && (
+             <div className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-400 flex items-center gap-2">
+                 <span>META:</span>
+                 {isEditingGoal ? (
+                     <input autoFocus value={monthGoal} onChange={e => setMonthGoal(e.target.value)} onBlur={() => { handleInitializeMonth(); setIsEditingGoal(false); }} className="bg-transparent text-white w-20 outline-none border-b border-cyan-500" />
+                 ) : ( <span onClick={() => setIsEditingGoal(true)} className="cursor-pointer hover:text-white">{monthGoal || 'Definir $'} ✎</span> )}
+             </div>
           )}
-
-          <span style={{fontWeight: 'bold', fontSize: '14px', background:'rgba(255,255,255,0.2)', padding:'2px 8px', borderRadius:'4px'}}>{MONTHS_LIST[selectedDate.getMonth()].toUpperCase()} - PROYECTO:</span>
-          {isMonthInitialized ? ( isEditingGoal ? ( <input autoFocus value={monthGoal} onChange={(e) => setMonthGoal(e.target.value)} onBlur={handleSaveGoal} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveGoal(); }} style={{flex: 1, border: 'none', borderRadius: '4px', padding: '5px', color: '#333'}} /> ) : ( <div onClick={() => setIsEditingGoal(true)} style={{flex: 1, cursor: 'pointer', borderBottom: '1px dashed rgba(255,255,255,0.5)', paddingBottom: '2px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}} title="Click para editar"> {monthGoal || "Click meta..."} ✎ </div> ) ) : ( <div style={{flex: 1, color: 'rgba(255,255,255,0.7)', fontStyle: 'italic', fontSize:'13px'}}> (Inicializa mes) </div> )}
         </div>
 
-        <div style={{ padding: '20px', background: 'white', display:'flex', justifyContent:'center', alignItems:'center', borderBottom:'1px solid #eee', gap:'15px' }}>
-          <button onClick={handlePrevMonth} style={{background:'none', border:'none', fontSize:'24px', cursor:'pointer', color:'#555'}}> ◀ </button>
-          <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-            <select value={selectedDate.getMonth()} onChange={handleMonthChange} style={{padding:'8px 12px', fontSize:'16px', fontWeight:'bold', textTransform:'uppercase', border:'1px solid #ccc', borderRadius:'6px', background:'#fff', color:'#333'}}> {MONTHS_LIST.map((m, i) => ( <option key={i} value={i}>{m}</option> ))} </select>
-            <select value={selectedDate.getFullYear()} onChange={handleYearChange} style={{padding:'8px 12px', fontSize:'16px', fontWeight:'bold', border:'1px solid #ccc', borderRadius:'6px', background:'#fff', color:'#333'}}> {YEARS_LIST.map(y => ( <option key={y} value={y}>{y}</option> ))} </select>
-          </div>
-          <button onClick={handleNextMonth} style={{background:'none', border:'none', fontSize:'24px', cursor:'pointer', color:'#555'}}> ▶ </button>
+        <div className="flex items-center gap-3">
+            <button onClick={() => setIsEventsManagerOpen(true)} className="bg-purple-900/50 hover:bg-purple-800 text-purple-200 px-3 py-1 rounded text-sm border border-purple-500/30">📅 Eventos</button>
+            <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
+                <button onClick={() => setSelectedDate(new Date(selectedDate.setMonth(selectedDate.getMonth()-1)))} className="px-3 hover:bg-slate-700 rounded text-slate-300">◀</button>
+                <button onClick={() => setSelectedDate(new Date())} className="px-3 text-sm font-bold text-cyan-500">HOY</button>
+                <button onClick={() => setSelectedDate(new Date(selectedDate.setMonth(selectedDate.getMonth()+1)))} className="px-3 hover:bg-slate-700 rounded text-slate-300">▶</button>
+            </div>
+            {!isMonthInitialized && !loading && (
+                 <button onClick={handleInitializeMonth} className="bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white px-4 py-1.5 rounded-full text-sm font-bold shadow-lg shadow-purple-900/50 animate-pulse">⚡ Inicializar</button>
+            )}
+            <button onClick={() => setIsConfigOpen(true)} className="p-2 text-slate-400 hover:text-white transition bg-slate-800 rounded-full">⚙️</button>
+            <button className="md:hidden p-2" onClick={() => setShowMobileSidebar(!showMobileSidebar)}>☰</button>
         </div>
+      </header>
 
-        <div style={{flex:1, padding:'10px', overflowY:'auto'}}>
-          <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', textAlign:'center', marginBottom:'10px', color:'#777', fontWeight:'bold', fontSize: isMobile ? '10px' : '14px'}}> {DAYS_HEADER.map(d => <div key={d}>{isMobile ? d.charAt(0) : d}</div>)} </div>
-          <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gridAutoRows:'minmax(80px, 1fr)', gap:'5px'}}>
-            {calendarDays.map((dateObj, i) => {
-              if (!dateObj) return <div key={i} />;
-              const isToday = dateObj.toDateString() === new Date().toDateString();
-              const isPastDay = dayjs(dateObj).isBefore(dayjs(), 'day');
-              const dayStr = dateObj.getDate().toString().padStart(2, '0');
-              let available = 0; let hasSlots = false;
-              if (currentMonthData) {
-                const slots = Object.entries(currentMonthData).filter(([k]) => k.startsWith(`${dayStr}_`));
-                if (slots.length > 0) { hasSlots = true; available = slots.filter(([,v]) => { if(v.status !== 'available') return false; if(isPastDay) return false; if(isToday) { const [h, m] = v.time.split(':').map(Number); return dayjs().hour(h).minute(m).isAfter(dayjs()); } return true; }).length; }
-              }
-              let bg = 'white'; let status = ''; let statusCol = '#999';
-              if (isPastDay) { bg = '#f9f9f9'; } else if (hasSlots) { if (available === 0) { bg = '#FFEBEE'; status = isMobile ? '0' : 'Agotado'; statusCol = '#D32F2F'; } else { bg = '#E8F5E9'; status = isMobile ? `${available}` : `${available} Libres`; statusCol = '#2E7D32'; } }
-              return (
-                <div key={i} onClick={() => { setSelectedDate(dateObj); setIsDayViewOpen(true); }} style={{ background: isToday ? '#E3F2FD' : bg, border: isToday ? '2px solid #2196F3' : '1px solid #ddd', borderRadius: '4px', padding:'5px', cursor:'pointer', display:'flex', flexDirection:'column', justifyContent:'space-between', minHeight: isMobile ? '60px' : '100px' }}>
-                  <span style={{fontWeight:'bold', color: isToday ? '#1565C0' : '#333', fontSize: isMobile ? '14px' : '18px'}}>{dateObj.getDate()}</span>
-                  {status && <div style={{alignSelf:'flex-end', fontSize:'10px', fontWeight:'bold', color: statusCol, background:'rgba(255,255,255,0.7)', padding:'2px 4px', borderRadius:'10px'}}>{status}</div>}
+      {/* BODY */}
+      <div className="flex flex-1 overflow-hidden relative">
+        
+        {/* SIDEBAR */}
+        <div className={`absolute md:relative z-10 h-full w-80 bg-slate-900 border-r border-slate-700 p-4 overflow-y-auto transition-transform duration-300 ${isMobile ? (showMobileSidebar ? 'translate-x-0' : '-translate-x-full') : 'translate-x-0'}`}>
+             <div className="mb-6">
+                <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-xs font-bold text-orange-400 uppercase tracking-widest">Lista de Espera <span className="text-slate-500">({waitlist.length})</span></h3>
+                    <button onClick={() => setIsWaitlistFormOpen(true)} className="text-xs bg-slate-800 px-2 py-1 rounded hover:bg-slate-700">+</button>
                 </div>
-              )
-            })}
-          </div>
+                <div className="space-y-2">
+                    {waitlist.map(w => (
+                        <div key={w.id} className="p-3 bg-slate-800/50 rounded border border-slate-700/50 hover:border-orange-500/30 transition group relative">
+                            <div className="font-bold text-slate-200 text-sm">{w.patientName}</div>
+                            <div className="text-xs text-slate-500 mt-1 truncate">{w.notes}</div>
+                            <button onClick={() => { if(window.confirm("¿Borrar?")) { deleteDoc(doc(db, "waitlist", w.id)); loadWaitlist(); } }} className="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100">✕</button>
+                        </div>
+                    ))}
+                </div>
+             </div>
+             <div className="mb-6">
+                <h3 className="text-xs font-bold text-green-400 uppercase tracking-widest mb-3">Requieren Cita</h3>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {patientsNeedingAppt.map(p => (
+                        <div key={p.id} onClick={() => { setFormData({...formData, patientId: p.id, patientName: p.fullName}); alert(`Seleccionado: ${p.fullName}.`); if(isMobile) setShowMobileSidebar(false); }} className="p-2 bg-slate-800/30 rounded flex justify-between items-center border border-slate-700/30 cursor-pointer hover:bg-slate-800">
+                            <span className="text-xs text-slate-300">{p.fullName}</span>
+                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                        </div>
+                    ))}
+                </div>
+             </div>
+             <div className="mb-6">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Pausados</h3>
+                 <div className="space-y-1">
+                    {pausedList.map(p => (
+                        <div key={p.id} className="flex justify-between items-center text-xs text-slate-500 p-1 hover:bg-slate-800 rounded">
+                            <span>{p.fullName}</span>
+                            <button onClick={() => handleReactivatePatient(p.id, p.fullName)} className="text-blue-400 hover:text-blue-300">↻</button>
+                        </div>
+                    ))}
+                </div>
+             </div>
+        </div>
+
+        {/* CALENDARIO */}
+        <div className="flex-1 overflow-y-auto p-4 bg-slate-950/50 relative">
+            {loading && <div className="absolute inset-0 bg-slate-900/80 z-50 flex items-center justify-center"><div className="animate-spin text-4xl">💠</div></div>}
+            
+            <div className="grid grid-cols-7 gap-2 mb-2">
+                {['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].map(d => <div key={d} className="text-center py-2 font-bold text-slate-600 text-xs tracking-wider">{d}</div>)}
+            </div>
+
+            <div className="grid grid-cols-7 gap-2 auto-rows-min pb-20">
+                {calendarDays.map((dateObj, i) => {
+                    if (!dateObj) return <div key={i} className="bg-transparent" />;
+                    const isToday = dateObj.toDateString() === new Date().toDateString();
+                    const dayStr = dateObj.getDate().toString().padStart(2, '0');
+                    const daySlots = currentMonthData ? Object.entries(currentMonthData).filter(([k]) => k.startsWith(`${dayStr}_`)).sort((a, b) => a[0].localeCompare(b[0])) : [];
+                    
+                    return (
+                        <div key={i} 
+                             onClick={() => { setSelectedDate(dateObj); setIsDayViewOpen(true); }}
+                             className={`min-h-[120px] p-2 border rounded-lg transition-all flex flex-col cursor-pointer hover:border-slate-600 ${isToday ? 'bg-slate-800/80 border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.1)]' : 'bg-slate-900 border-slate-800'}`}>
+                             <div className={`text-right font-bold mb-2 text-sm ${isToday ? 'text-cyan-400' : 'text-slate-600'}`}>{dateObj.getDate()}</div>
+                             <div className="space-y-1 flex-1">
+                                {daySlots.map(([key, slot]) => {
+                                    const isBooked = slot.status === 'booked';
+                                    const isBlocked = slot.status === 'blocked';
+                                    const isCancelled = slot.status === 'cancelled';
+                                    return (
+                                        <div key={key} className={`text-[10px] px-2 py-1.5 rounded truncate border-l-2 ${isBooked ? (slot.paymentStatus === 'paid' ? 'bg-emerald-900/20 text-emerald-300 border-emerald-500' : 'bg-blue-900/20 text-blue-300 border-blue-500') : isBlocked ? 'bg-red-900/10 text-red-400 border-red-500/50 opacity-60' : isCancelled ? 'bg-slate-800 text-slate-500 line-through' : 'bg-emerald-900/5 text-emerald-400/70'}`}>
+                                            <span className="font-bold mr-1">{slot.time}</span> {isBooked ? slot.patientName : (isBlocked ? '🚫' : 'LIBRE')}
+                                        </div>
+                                    );
+                                })}
+                             </div>
+                        </div>
+                    );
+                })}
+            </div>
         </div>
       </div>
 
-      {/* --- MODALES INLINE (Estos pueden refactorizarse en una fase 2) --- */}
-      {isDayViewOpen && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'end', zIndex:100}}>
-          <div style={{width: isMobile ? '100%' : '400px', background:'white', height:'100%', padding:'20px', display:'flex', flexDirection:'column', boxShadow:'-5px 0 20px rgba(0,0,0,0.1)'}}>
-            <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'20px', borderBottom:'1px solid #eee', paddingBottom:'15px'}}>
-              <div> <h2 style={{margin:0}}>{selectedDate.toLocaleDateString('es-ES', {weekday:'long', day:'numeric'})}</h2> <div style={{display:'flex', gap:'10px', marginTop:'10px'}}> <button onClick={handleBlockDay} style={{fontSize:'12px', padding:'5px 12px', background:'#FFEBEE', color:'#D32F2F', border:'1px solid #FFCDD2', borderRadius:'20px', cursor:'pointer', fontWeight:'bold'}}>🚫 Bloquear día</button> <button onClick={handleAddExtraSlot} style={{fontSize:'12px', padding:'5px 12px', background:'#E3F2FD', color:'#1565C0', border:'1px solid #BBDEFB', borderRadius:'20px', cursor:'pointer', fontWeight:'bold'}}>➕ Turno Extra</button> </div> </div>
-              <button onClick={() => setIsDayViewOpen(false)} style={{border:'none', background:'none', fontSize:'24px', cursor:'pointer'}}> ✕ </button>
-            </div>
-            <div style={{flex:1, overflowY:'auto'}}>{renderDaySlots()}</div>
-          </div>
-        </div>
-      )}
+      {/* --- MODALES --- */}
 
-      {/* MODAL EVENTS MANAGER */}
-      {isEventsManagerOpen && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:50}}>
-          <div style={{background:'white', padding:'0', borderRadius:'12px', width:'500px', maxHeight:'80vh', overflow:'hidden', display:'flex', flexDirection:'column'}}>
-            <div style={{padding:'20px', borderBottom:'1px solid #eee', display:'flex', justifyContent:'space-between', alignItems:'center', background:'#f9f9f9'}}>
-              <h3 style={{margin:0}}>📅 Eventos del Año</h3> <button onClick={() => setIsNewEventModalOpen(true)} style={{background:'#4CAF50', color:'white', border:'none', padding:'8px 15px', borderRadius:'4px', cursor:'pointer', fontWeight:'bold'}}>+ Nuevo Evento</button>
-            </div>
-            <div style={{display:'flex', borderBottom:'1px solid #eee'}}>
-              <div onClick={() => setEventsTab('upcoming')} style={{flex:1, padding:'15px', textAlign:'center', cursor:'pointer', background: eventsTab==='upcoming' ? 'white' : '#f0f0f0', borderBottom: eventsTab==='upcoming' ? '2px solid #2196F3' : 'none', fontWeight: eventsTab==='upcoming' ? 'bold' : 'normal'}}>🚀 Próximos</div>
-              <div onClick={() => setEventsTab('past')} style={{flex:1, padding:'15px', textAlign:'center', cursor:'pointer', background: eventsTab==='past' ? 'white' : '#f0f0f0', borderBottom: eventsTab==='past' ? '2px solid #2196F3' : 'none', fontWeight: eventsTab==='past' ? 'bold' : 'normal'}}>📜 Historial</div>
-            </div>
-            <div style={{flex:1, overflowY:'auto', padding:'20px'}}>
-              {annualEvents.filter(e => { const end = dayjs(e.endDate); return eventsTab === 'upcoming' ? end.isAfter(dayjs().subtract(1, 'day')) : end.isBefore(dayjs().subtract(1, 'day')); }).map(e => (
-                <div key={e.id} style={{border:'1px solid #eee', borderRadius:'8px', padding:'15px', marginBottom:'10px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                  <div> <div style={{fontWeight:'bold', fontSize:'16px'}}>{e.title}</div> <div style={{fontSize:'12px', color:'#666'}}> {dayjs(e.startDate).format('DD MMM')} - {dayjs(e.endDate).format('DD MMM YYYY')} </div> </div>
-                  <div style={{display:'flex', gap:'5px'}}> <button onClick={() => openEditEvent(e)} title="Editar" style={{border:'none', background:'#E3F2FD', color:'#1565C0', borderRadius:'4px', padding:'5px 10px', cursor:'pointer'}}>✏️</button> <button onClick={() => handleDeleteEvent(e)} title="Eliminar y Liberar" style={{border:'none', background:'#FFEBEE', color:'#D32F2F', borderRadius:'4px', padding:'5px 10px', cursor:'pointer'}}>🗑️</button> </div>
-                </div>
-              ))}
-            </div>
-            <div style={{padding:'15px', borderTop:'1px solid #eee', textAlign:'right'}}> <button onClick={() => setIsEventsManagerOpen(false)} style={{padding:'8px 20px', background:'#eee', border:'none', borderRadius:'4px', cursor:'pointer'}}>Cerrar</button> </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL NUEVO/EDITAR EVENTO */}
-      {isNewEventModalOpen && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:60}}>
-          <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'350px'}}>
-            <h3>{editingEventId ? '✏️ Editar Evento' : '➕ Nuevo Evento'}</h3> <DateSelectorRow label="Desde:" dateValue={newEventData.start} onChange={(d) => setNewEventData({...newEventData, start: d})} /> <DateSelectorRow label="Hasta:" dateValue={newEventData.end} onChange={(d) => setNewEventData({...newEventData, end: d})} />
-            <label style={{display:'block', marginTop:'15px'}}> <span style={{fontSize:'12px', fontWeight:'bold', color:'#666'}}>Título:</span> <input type="text" value={newEventData.title} onChange={e => setNewEventData({...newEventData, title: e.target.value})} style={{width:'100%', padding:'8px', marginTop:'5px', borderRadius:'4px', border:'1px solid #ccc'}} /> </label>
-            <div style={{marginTop:'20px', textAlign:'right'}}> <button onClick={() => { setIsNewEventModalOpen(false); setEditingEventId(null); setConflictList([]); }} style={{marginRight:'10px', padding:'8px 15px', background:'#eee', border:'none', borderRadius:'4px', cursor:'pointer'}}>Cancelar</button> <button onClick={handleSaveEvent} style={{background:'#4CAF50', color:'white', border:'none', padding:'8px 15px', borderRadius:'4px', cursor:'pointer', fontWeight:'bold'}}>Guardar</button> </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL CONFLICTOS */}
-      {isConflictModalOpen && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:100}}>
-          <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'500px'}}>
-            <h3 style={{margin:0, color:'#D32F2F'}}>⚠️ Conflicto Detectado</h3>
-            <div style={{maxHeight:'300px', overflowY:'auto', background:'#FFF8F8', border:'1px solid #FFCDD2', borderRadius:'8px', padding:'10px', margin:'15px 0'}}>
-              {conflictList.map((c) => ( <div key={c.slotKey} style={{background:'white', padding:'10px', marginBottom:'10px', borderRadius:'6px', display:'flex', justifyContent:'space-between', alignItems:'center'}}> <div> <div style={{fontWeight:'bold'}}>{c.slotData.patientName}</div> <div style={{fontSize:'12px'}}>{dayjs(c.date).format('DD MMM')} - {c.slotData.time}</div> </div> <div style={{display:'flex', gap:'5px'}}> <button onClick={() => handleResolveConflictToWaitlist(c)} style={{background:'#7B1FA2', color:'white', border:'none', borderRadius:'4px', padding:'5px', fontSize:'11px'}}>⏳ Espera</button> <button onClick={() => handleKeepConflict(c)} style={{background:'#eee', padding:'5px', fontSize:'11px'}}>Mantener</button> </div> </div> ))}
-            </div>
-            <div style={{textAlign:'right'}}> <button onClick={() => setIsConflictModalOpen(false)} style={{marginRight:'10px'}}>Cancelar</button> <button onClick={finalizeEventSave} style={{background:'#D32F2F', color:'white', padding:'10px 20px', border:'none', borderRadius:'4px'}}>Finalizar</button> </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- FORMULARIO DE CITA COMPONETIZADO --- */}
+      {/* 1. APPOINTMENT FORM */}
       <AppointmentForm
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        onSave={handleSaveAppointment}
-        formData={formData}
-        setFormData={setFormData}
-        patients={patients}
-        savePricePreference={savePricePreference}
-        setSavePricePreference={setSavePricePreference}
-        selectedPatientNoShows={selectedPatientNoShows}
-        onPatientSelect={handlePatientSelect}
+        isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} onSave={handleSaveAppointment} formData={formData} setFormData={setFormData} patients={patients}
+        savePricePreference={savePricePreference} setSavePricePreference={setSavePricePreference} selectedPatientNoShows={selectedPatientNoShows}
+        onPatientSelect={(id, name) => setFormData({...formData, patientId: id, patientName: name})}
       />
 
-      {/* MODAL ADD WAITLIST (Pequeño, se puede dejar aquí por ahora) */}
-      {isWaitlistFormOpen && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:30}}>
-          <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'350px'}}>
-            <h3>Agregar a Lista de Espera</h3>
-            <form onSubmit={handleAddToWaitlist}>
-              <PatientSelector patients={patients} selectedPatientId={formData.patientId} manualNameValue={formData.patientName} onSelect={(id, name) => setFormData({...formData, patientId: id, patientName: name})} />
-              <textarea placeholder="Preferencia (Ej: Solo tardes)..." value={formData.adminNotes} onChange={e => setFormData({...formData, adminNotes: e.target.value})} style={{width:'100%', marginTop:'15px', padding:'8px'}} />
-              <div style={{marginTop:'20px', textAlign:'right'}}> <button type="button" onClick={() => setIsWaitlistFormOpen(false)} style={{marginRight:'10px', padding:'8px'}}>Cancelar</button> <button type="submit" style={{padding:'8px 15px', background:'#9C27B0', color:'white', border:'none'}}>Encolar</button> </div>
-            </form>
+      {/* 2. CONFIG MODAL */}
+      <AgendaConfigModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} currentConfig={workConfig} onSave={async (cfg) => { await updateDoc(doc(db, "professionals", selectedProfId), { agendaSettings: cfg }); setWorkConfig(cfg); setIsConfigOpen(false); }} />
+
+      {/* 3. DAY VIEW MODAL */}
+      {isDayViewOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-end">
+              <div className="w-full md:w-[450px] bg-slate-900 h-full border-l border-slate-700 p-6 flex flex-col shadow-2xl">
+                  <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-xl font-bold text-white">{selectedDate.toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long'})}</h2>
+                      <button onClick={() => setIsDayViewOpen(false)} className="text-slate-400 hover:text-white text-xl">✕</button>
+                  </div>
+                  <div className="flex gap-2 mb-4">
+                      <button onClick={handleBlockDay} className="flex-1 bg-red-900/30 text-red-300 border border-red-500/30 py-2 rounded text-sm hover:bg-red-900/50">🚫 Bloquear Día</button>
+                      <button onClick={handleAddExtraSlot} className="flex-1 bg-blue-900/30 text-blue-300 border border-blue-500/30 py-2 rounded text-sm hover:bg-blue-900/50">➕ Turno Extra</button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto">{renderDaySlots()}</div>
+              </div>
+          </div>
+      )}
+
+      {/* 4. EVENTS MANAGER MODAL */}
+      {isEventsManagerOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl rounded-xl shadow-2xl flex flex-col max-h-[80vh]">
+                  <div className="p-4 border-b border-slate-700 flex justify-between items-center">
+                      <h3 className="font-bold text-lg text-white">📅 Gestión de Eventos</h3>
+                      <button onClick={() => setIsNewEventModalOpen(true)} className="bg-green-600 text-white px-3 py-1.5 rounded text-sm font-bold hover:bg-green-500">+ Nuevo Evento</button>
+                  </div>
+                  <div className="flex border-b border-slate-700">
+                      <button onClick={() => setEventsTab('upcoming')} className={`flex-1 py-3 text-sm font-bold ${eventsTab==='upcoming' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500'}`}>🚀 Próximos</button>
+                      <button onClick={() => setEventsTab('past')} className={`flex-1 py-3 text-sm font-bold ${eventsTab==='past' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500'}`}>📜 Historial</button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                      {annualEvents.filter(e => { const end = dayjs(e.endDate); return eventsTab === 'upcoming' ? end.isAfter(dayjs().subtract(1, 'day')) : end.isBefore(dayjs().subtract(1, 'day')); }).map(e => (
+                          <div key={e.id} className="p-3 border border-slate-700 rounded bg-slate-800/50 flex justify-between items-center">
+                              <div><div className="font-bold text-white">{e.title}</div><div className="text-xs text-slate-400">{dayjs(e.startDate).format('DD MMM')} - {dayjs(e.endDate).format('DD MMM YYYY')}</div></div>
+                              <button onClick={() => handleDeleteEvent(e)} className="text-red-400 hover:text-red-300">🗑️</button>
+                          </div>
+                      ))}
+                  </div>
+                  <div className="p-4 border-t border-slate-700 text-right"><button onClick={() => setIsEventsManagerOpen(false)} className="px-4 py-2 bg-slate-800 rounded text-slate-300 hover:text-white">Cerrar</button></div>
+              </div>
+          </div>
+      )}
+
+      {/* 5. NEW EVENT MODAL */}
+      {isNewEventModalOpen && (
+        <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 p-6 rounded-xl w-full max-w-sm">
+            <h3 className="text-lg font-bold text-white mb-4">{editingEventId ? '✏️ Editar' : '➕ Nuevo Evento'}</h3>
+            <DateSelectorRow label="Desde:" dateValue={newEventData.start} onChange={(d) => setNewEventData({...newEventData, start: d})} />
+            <DateSelectorRow label="Hasta:" dateValue={newEventData.end} onChange={(d) => setNewEventData({...newEventData, end: d})} />
+            <div className="mb-4"><label className="block text-xs text-slate-400 mb-1">Título</label><input type="text" value={newEventData.title} onChange={e => setNewEventData({...newEventData, title: e.target.value})} className="w-full bg-slate-800 border border-slate-700 text-white rounded p-2" /></div>
+            <div className="flex justify-end gap-2">
+                <button onClick={() => setIsNewEventModalOpen(false)} className="px-3 py-2 bg-slate-800 rounded text-slate-300">Cancelar</button>
+                <button onClick={handleSaveEvent} className="px-3 py-2 bg-green-600 rounded text-white font-bold">Guardar</button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* MODAL WAITLIST SELECTOR */}
+      {/* 6. CONFLICT MODAL */}
+      {isConflictModalOpen && (
+          <div className="fixed inset-0 bg-black/90 z-[70] flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-red-900 p-6 rounded-xl w-full max-w-lg">
+                  <h3 className="text-xl font-bold text-red-400 mb-2">⚠️ Conflictos Detectados</h3>
+                  <p className="text-sm text-slate-400 mb-4">Las siguientes citas chocan con tus vacaciones:</p>
+                  <div className="max-h-60 overflow-y-auto mb-4 bg-red-900/10 border border-red-900/30 rounded p-2 space-y-2">
+                      {conflictList.map(c => (
+                          <div key={c.slotKey} className="flex justify-between items-center p-2 bg-slate-800 rounded">
+                              <div><div className="font-bold text-white">{c.slotData.patientName}</div><div className="text-xs text-slate-400">{dayjs(c.date).format('DD MMM')} - {c.slotData.time}</div></div>
+                              <span className="text-xs bg-red-900 text-red-200 px-2 py-1 rounded">Ocupado</span>
+                          </div>
+                      ))}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                      <button onClick={() => setIsConflictModalOpen(false)} className="px-4 py-2 bg-slate-800 rounded">Cancelar</button>
+                      <button onClick={finalizeEventSave} className="px-4 py-2 bg-red-600 text-white rounded font-bold">Guardar de todos modos</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 7. WAITLIST SELECTOR MODAL */}
       {isWaitlistSelectorOpen && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:40}}>
-          <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'400px', maxHeight:'80vh', overflowY:'auto'}}>
-            <h3 style={{color:'#2E7D32', marginTop:0}}>♻️ Reasignar Espacio</h3>
-            {waitlist.map(w => ( <div key={w.id} onClick={() => handleAssignFromWaitlist(w)} style={{padding:'10px', border:'1px solid #eee', marginBottom:'8px', borderRadius:'6px', cursor:'pointer', background:'#f9f9f9'}}> <div style={{fontWeight:'bold'}}>{w.patientName}</div> <div style={{fontSize:'12px', color:'#555'}}>{w.notes}</div> </div> ))}
-            <button onClick={() => { setIsWaitlistSelectorOpen(false); setSlotToReassign(null); }} style={{marginTop:'10px', padding:'8px'}}>Cancelar</button>
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-md shadow-2xl">
+                  <h3 className="text-lg font-bold mb-4 text-green-400">♻️ Reasignar Turno</h3>
+                  <div className="max-h-60 overflow-y-auto mb-4 border border-slate-700 rounded-lg bg-slate-950/50">
+                      {waitlist.length === 0 && <div className="p-4 text-center text-slate-500 text-sm">Lista vacía.</div>}
+                      {waitlist.map(w => (
+                          <div key={w.id} onClick={() => handleAssignFromWaitlist(w)} className="p-3 border-b border-slate-800 hover:bg-green-900/20 cursor-pointer transition-colors flex justify-between items-center group">
+                              <div><div className="font-bold text-slate-200 group-hover:text-green-300">{w.patientName}</div><div className="text-xs text-slate-500">{w.notes}</div></div>
+                              <span className="text-xl opacity-0 group-hover:opacity-100 transition">👉</span>
+                          </div>
+                      ))}
+                  </div>
+                  <button onClick={() => setIsWaitlistSelectorOpen(false)} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold transition">Cancelar</button>
+              </div>
           </div>
+      )}
+
+      {/* 8. ADD WAITLIST FORM */}
+      {isWaitlistFormOpen && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+            <div className="bg-slate-900 border border-slate-700 p-6 rounded-xl w-full max-w-sm">
+                <h3 className="text-lg font-bold text-white mb-4">Agregar a Lista de Espera</h3>
+                <input placeholder="Nombre del paciente" className="w-full bg-slate-800 border border-slate-700 text-white p-2 rounded mb-2" value={formData.patientName} onChange={e => setFormData({...formData, patientName: e.target.value})} />
+                <textarea placeholder="Notas (Horario preferido...)" className="w-full bg-slate-800 border border-slate-700 text-white p-2 rounded mb-4" value={formData.adminNotes} onChange={e => setFormData({...formData, adminNotes: e.target.value})} />
+                <div className="flex justify-end gap-2">
+                    <button onClick={() => setIsWaitlistFormOpen(false)} className="px-3 py-2 bg-slate-800 rounded text-slate-300">Cancelar</button>
+                    <button onClick={async () => { 
+                        if(!formData.patientName) return alert("Nombre requerido");
+                        await addDoc(collection(db, "waitlist"), { professionalId: selectedProfId, patientId: null, patientName: formData.patientName, notes: formData.adminNotes, createdAt: serverTimestamp() });
+                        loadWaitlist(); setIsWaitlistFormOpen(false); setFormData({...formData, patientName:'', adminNotes:''});
+                    }} className="px-3 py-2 bg-blue-600 rounded text-white font-bold">Agregar</button>
+                </div>
+            </div>
         </div>
       )}
 
-      <AgendaConfigModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} currentConfig={workConfig} onSave={handleSaveConfig} />
-      
-      {confirmModal.isOpen && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:100}}>
-          <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'350px'}}>
-            <h3>{confirmModal.title}</h3> <p>{confirmModal.message}</p>
-            <div style={{textAlign:'right'}}> <button onClick={() => setConfirmModal({...confirmModal, isOpen:false})} style={{marginRight:'10px'}}>Cancelar</button> <button onClick={confirmModal.onConfirm} style={{background:'#2196F3', color:'white', border:'none', padding:'8px 15px', borderRadius:'4px'}}>Confirmar</button> </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

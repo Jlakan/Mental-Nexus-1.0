@@ -36,13 +36,13 @@ export default function App() {
   // Estados de Verificación de Perfil
   const [profileCompleted, setProfileCompleted] = useState(false);
   const [isRegisteredPro, setIsRegisteredPro] = useState(false);
-  const [isRegisteredAssistant, setIsRegisteredAssistant] = useState(false); 
+  const [isRegisteredAssistant, setIsRegisteredAssistant] = useState(false);
 
   // Estados de Navegación / Desarrollo
   const [simulatedRole, setSimulatedRole] = useState<string | null>(null);
   const [adminViewMode, setAdminViewMode] = useState<'admin' | 'professional'>('admin');
-   
-  // Persistencia del doctor seleccionado
+  
+  // Persistencia del doctor seleccionado (LocalStorage)
   const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(() => {
     return localStorage.getItem('nexus_assistant_selected_doc');
   });
@@ -55,6 +55,7 @@ export default function App() {
       setLoading(true);
       if (currentUser) {
         setUser(currentUser);
+        // Buscar datos maestros en users/{UID}
         const userRef = doc(db, 'users', currentUser.uid);
         const docSnap = await getDoc(userRef);
 
@@ -62,6 +63,7 @@ export default function App() {
           const data = docSnap.data();
           setUserData(data);
 
+          // Verificar sub-perfiles según el rol
           if (data.role === 'patient') {
             setProfileCompleted(data.profileCompleted || false);
           } 
@@ -90,7 +92,7 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // 3. HANDLERS
   // ---------------------------------------------------------------------------
-   
+  
   const handleRoleSelect = async (role: 'patient' | 'professional' | 'assistant') => {
     if (!user) return;
     try {
@@ -128,7 +130,7 @@ export default function App() {
   }
 
   if (!user) return <Login />;
-   
+  
   if (!userData?.role) {
     return <RoleSelection userName={user.displayName || 'Usuario'} onSelect={handleRoleSelect} />;
   }
@@ -160,9 +162,13 @@ export default function App() {
       return (
         <>
             {!isRegisteredAssistant ? (
+                // 1. Si no tiene perfil, muestra registro
                 <AssistantRegister />
             ) : (
+                // 2. Si tiene perfil, muestra Panel o Agenda
                 <div className="flex flex-col h-screen bg-slate-950">
+                    
+                    {/* Botón flotante para volver (Solo visible si hay doctor seleccionado) */}
                     {selectedDoctorId && (
                     <div className="fixed top-4 left-4 z-50">
                         <button 
@@ -175,13 +181,15 @@ export default function App() {
                     )}
 
                     {selectedDoctorId ? (
+                    // VISTA DE AGENDA (Con la corrección aplicada)
                     <AgendaView 
                         userRole="assistant"
-                        currentUserId={selectedDoctorId} 
-                        doctorId={selectedDoctorId}      
+                        currentUserId={user.uid}     // <--- TU ID (Asistente)
+                        doctorId={selectedDoctorId}  // <--- ID DEL DOCTOR (Objetivo)
                         onBack={() => handleSelectDoctor(null)} 
                     />
                     ) : (
+                    // VISTA DE PANEL (Lista de doctores)
                     <AssistantPanel onSelectProfessional={handleSelectDoctor} />
                     )}
                 </div>
@@ -196,7 +204,7 @@ export default function App() {
       return (
         <div className="relative min-h-screen">
             
-            {/* ✅ PROTECCIÓN AGREGADA: El botón solo se renderiza si isAdmin es true */}
+            {/* Solo muestra el botón si users/{uid} tiene isAdmin: true */}
             {userData?.isAdmin === true && (
                 <div className="fixed bottom-6 right-20 z-40">
                     <button 
@@ -212,7 +220,6 @@ export default function App() {
             {adminViewMode === 'admin' ? (
                 <AdminPanel />
             ) : (
-                // Si no tienes isAdmin, nunca podrás llegar aquí porque el botón no existe
                 <ProfessionalDashboard user={user} />
             )}
             <DevRoleSwitcher onSwitch={setSimulatedRole} />
@@ -220,27 +227,29 @@ export default function App() {
       );
   }
 
-  // --- FALLBACK ---
+  // --- FALLBACK (Rol desconocido) ---
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-6 text-center">
       <h1 className="text-3xl text-red-500 font-bold mb-4">⚠️ Rol Desconocido</h1>
-      <p className="mb-6 text-slate-400">Rol: <strong>"{activeRole}"</strong></p>
+      <p className="mb-6 text-slate-400">Rol detectado: <strong>"{activeRole}"</strong></p>
       <button
         onClick={async () => {
-          if(!window.confirm("¿Restablecer rol?")) return;
+          if(!window.confirm("¿Seguro que deseas restablecer tu rol?")) return;
           await setDoc(doc(db, "users", user.uid), { role: null }, { merge: true });
           window.location.reload();
         }}
-        className="px-6 py-2 bg-red-600 rounded font-bold mb-4"
+        className="px-6 py-2 bg-red-600 rounded font-bold mb-4 hover:bg-red-500 transition"
       >
-        🔄 Restablecer
+        🔄 Restablecer Cuenta
       </button>
-      <button onClick={() => auth.signOut()} className="underline text-slate-500">Cerrar Sesión</button>
+      <button onClick={() => auth.signOut()} className="underline text-slate-500 hover:text-white">
+        Cerrar Sesión
+      </button>
     </div>
   );
 }
 
-// DevRoleSwitcher
+// Componente auxiliar para desarrollo
 function DevRoleSwitcher({ onSwitch }: { onSwitch: (r: string | null) => void }) {
   return (
     <div className="fixed bottom-4 right-4 z-[9999] group">
