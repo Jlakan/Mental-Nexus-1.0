@@ -1,17 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  doc, 
-  updateDoc, 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  getDoc,       // Importado para leer el perfil del asistente
-  arrayUnion, 
-  setDoc, 
-  documentId    // Importado para la query por IDs
-} from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
+import { doc, updateDoc, collection, query, where, getDocs, arrayUnion, setDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth"; // IMPORTANTE: Agregamos esto
 import { auth, db } from '../services/firebase';
 
 interface Props {
@@ -33,11 +22,13 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
 
   // 1. EFECTO DE CARGA BLINDADO
   useEffect(() => {
+    // Usamos el listener oficial para estar 100% seguros de que el usuario existe
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUser(user);
         fetchMyDoctors(user.uid);
       } else {
+        // Si no hay usuario, quitamos el loading para no bloquear la pantalla
         setLoadingList(false);
       }
     });
@@ -47,47 +38,22 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
 
   const fetchMyDoctors = async (uid: string) => {
     try {
-      setLoadingList(true);
-      
-      // PASO 1: Leer el perfil del asistente
-      const assistantRef = doc(db, "assistants", uid);
-      const assistantSnap = await getDoc(assistantRef);
-
-      if (!assistantSnap.exists()) {
-        // Si no existe perfil de asistente, no tiene doctores
-        setMyDoctors([]);
-        return;
-      }
-
-      const assistantData = assistantSnap.data();
-      const linkedProfs: string[] = assistantData.linkedProfessionals || [];
-
-      // PASO 2: Validación
-      if (linkedProfs.length === 0) {
-        setMyDoctors([]);
-        return;
-      }
-
-      // PASO 3: Query usando documentId() e 'in' para traer solo los doctores específicos
-      // Nota: Firestore limita el operador 'in' a 10 valores (o 30 en versiones recientes). 
-      // Si un asistente tuviera más de 10 doctores, habría que paginar esto.
+      // Buscamos profesionales donde mi UID esté en su lista 'authorizedAssistants'
       const q = query(
-        collection(db, "professionals"),
-        where(documentId(), "in", linkedProfs)
+        collection(db, "professionals"), 
+        where("authorizedAssistants", "array-contains", uid)
       );
-
       const snap = await getDocs(q);
-
+      
       const list = snap.docs.map(d => ({
         id: d.id,
         ...d.data()
       }));
-      
       setMyDoctors(list);
-
     } catch (error) {
       console.error("Error cargando lista:", error);
     } finally {
+      // ESTO AHORA SIEMPRE SE EJECUTA
       setLoadingList(false);
     }
   };
@@ -95,8 +61,8 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
   // 2. Lógica de Vinculación
   const handleLink = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser) return;
-
+    if (!currentUser) return; // Usamos el estado local seguro
+    
     setIsLinking(true);
     setMsg('📡 Buscando señal...');
 
@@ -111,10 +77,10 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
         setIsLinking(false);
         return;
       }
-
+      
       const profDoc = snap.docs[0];
-
-      // B. Validar duplicados visuales (opcional, pero buena UX)
+      
+      // B. Validar duplicados
       if (myDoctors.find(d => d.id === profDoc.id)) {
         setMsg('⚠️ Ya estás vinculado a este profesional.');
         setIsLinking(false);
@@ -122,29 +88,17 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
       }
 
       // C. Escribir en la BD (Vincular)
-      
-      // C.1 Actualizar al Doctor
       await updateDoc(doc(db, "professionals", profDoc.id), {
         authorizedAssistants: arrayUnion(currentUser.uid)
       });
-
-      // C.2 Asegurar rol de usuario
+      
+      // Asegurar que el usuario tenga rol 'assistant' en su perfil
       await setDoc(doc(db, "users", currentUser.uid), { role: 'assistant' }, { merge: true });
-
-      // C.3 (NUEVO) Actualizar colección 'assistants'
-      // Esto es crucial para que la nueva lógica de fetchMyDoctors funcione
-      await setDoc(doc(db, "assistants", currentUser.uid), {
-        uid: currentUser.uid,
-        email: currentUser.email,
-        displayName: currentUser.displayName || 'Asistente',
-        linkedProfessionals: arrayUnion(profDoc.id),
-        lastUpdated: new Date()
-      }, { merge: true });
 
       setMsg('✅ ¡Vinculado correctamente!');
       setCode('');
-
-      // D. Recargar la lista usando la nueva lógica
+      
+      // D. Recargar la lista visualmente
       await fetchMyDoctors(currentUser.uid);
 
     } catch (error) {
@@ -166,7 +120,7 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white p-6 md:p-12 font-sans w-full">
-
+      
       <header className="max-w-6xl mx-auto mb-12 border-b border-slate-800 pb-6 flex justify-between items-end">
         <div>
           <h1 className="text-3xl font-bold mb-2">
@@ -180,7 +134,7 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
       </header>
 
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-
+        
         {/* COLUMNA IZQUIERDA (2/3): LISTA DE DOCTORES */}
         <div className="lg:col-span-2 space-y-6">
           <h2 className="text-xl font-bold flex items-center gap-2 text-cyan-400">
@@ -196,7 +150,7 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {myDoctors.map(doc => (
-                <div
+                <div 
                   key={doc.id}
                   onClick={() => onSelectProfessional(doc.id)}
                   className="bg-slate-800 border border-slate-700 p-6 rounded-xl cursor-pointer hover:border-cyan-400 hover:shadow-[0_0_20px_rgba(34,211,238,0.2)] group transition-all relative overflow-hidden"
@@ -206,15 +160,15 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0h18M5.25 12h13.5h-13.5zm0 0l-2.25 2.25M5.25 12l-2.25-2.25" />
                     </svg>
                   </div>
-
+                  
                   <h3 className="text-lg font-bold text-white mb-1 group-hover:text-cyan-400 transition-colors">
                     {doc.fullName || 'Dr. Sin Nombre'}
                   </h3>
                   <div className="text-sm text-slate-400 mb-6">{doc.professionType || 'Especialista'}</div>
-
+                  
                   <div className="flex items-center gap-2 text-xs font-mono text-cyan-400 uppercase tracking-wider font-bold">
                     <span>Acceder a Agenda</span>
-                    <span className="group-hover:translate-x-2 transition-transform"> → </span>
+                    <span className="group-hover:translate-x-2 transition-transform">→</span>
                   </div>
                 </div>
               ))}
@@ -245,7 +199,7 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
                 />
               </div>
 
-              <button
+              <button 
                 type="submit"
                 disabled={isLinking || !code}
                 className="w-full py-3 rounded-lg font-bold uppercase tracking-wider text-sm transition-all bg-purple-600 hover:bg-purple-500 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
@@ -262,8 +216,7 @@ export default function AssistantPanel({ onSelectProfessional }: Props) {
             </form>
 
             {msg && (
-              <div className={`mt-4 p-3 rounded-lg text-xs font-bold text-center border animate-in fade-in slide-in-from-top-2 ${msg.includes('✅') ?
-                'bg-green-500/10 border-green-500/50 text-green-400' : 'bg-red-500/10 border-red-500/50 text-red-400'}`}>
+              <div className={`mt-4 p-3 rounded-lg text-xs font-bold text-center border animate-in fade-in slide-in-from-top-2 ${msg.includes('✅') ? 'bg-green-500/10 border-green-500/50 text-green-400' : 'bg-red-500/10 border-red-500/50 text-red-400'}`}>
                 {msg}
               </div>
             )}
