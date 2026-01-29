@@ -5,7 +5,7 @@ import {
 } from "firebase/firestore";
 import { db } from '../../services/firebase'; 
 
-// Componentes externos (mantenidos)
+// Componentes externos
 import AppointmentForm from './AppointmentForm';
 import AgendaConfigModal from '../AgendaConfigModal';
 
@@ -26,6 +26,7 @@ dayjs.updateLocale('es', { weekStart: 0 });
 interface Props {
   userRole: 'professional' | 'assistant';
   currentUserId: string;
+  doctorId?: string; // <--- CORRECCIÓN 1: Agregado para que App.tsx no falle
   onBack?: () => void;
 }
 
@@ -90,10 +91,9 @@ const getDateFromSlotKey = (slotKey: string, year: number, month: number): Date 
   return new Date(year, month, day, h, m);
 };
 
-export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
-  // ----------------------------------------------------------------------
+export default function AgendaMain({ userRole, currentUserId, doctorId, onBack }: Props) {
+  
   // 1. ESTADO GLOBAL
-  // ----------------------------------------------------------------------
   
   // Responsive
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -101,7 +101,10 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
 
   // Contexto
   const [myProfessionals, setMyProfessionals] = useState<any[]>([]);
-  const [selectedProfId, setSelectedProfId] = useState<string>('');
+  // Si soy asistente, uso el doctorId que me pasaron, si no, inicio vacío hasta cargar
+  const [selectedProfId, setSelectedProfId] = useState<string>(
+     userRole === 'professional' ? currentUserId : (doctorId || '')
+  );
 
   // Agenda Data
   const [currentMonthData, setCurrentMonthData] = useState<MonthlySlotMap | null>(null);
@@ -128,7 +131,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
   const [isWaitlistFormOpen, setIsWaitlistFormOpen] = useState(false);
   const [isWaitlistSelectorOpen, setIsWaitlistSelectorOpen] = useState(false);
   
-  // Gestión de Eventos (Restaurado)
+  // Gestión de Eventos
   const [isEventsManagerOpen, setIsEventsManagerOpen] = useState(false);
   const [isNewEventModalOpen, setIsNewEventModalOpen] = useState(false);
   const [eventsTab, setEventsTab] = useState<'upcoming' | 'past'>('upcoming');
@@ -138,7 +141,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
     start: dayjs(), end: dayjs(), title: ''
   });
 
-  // Conflictos (Restaurado)
+  // Conflictos
   const [conflictList, setConflictList] = useState<ConflictItem[]>([]);
   const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [pendingEventSave, setPendingEventSave] = useState<{start: dayjs.Dayjs, end: dayjs.Dayjs, title: string, isEdit: boolean} | null>(null);
@@ -178,19 +181,21 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
           setMyProfessionals([selfData]);
           setSelectedProfId(currentUserId);
         } else {
-          const q = query(collection(db, "professionals"), where("authorizedAssistants", "array-contains", currentUserId));
-          const snap = await getDocs(q);
-          const pros = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          setMyProfessionals(pros);
-          if (pros.length > 0) {
-            setSelectedProfId(pros[0].id);
-            if ((pros[0] as any).agendaSettings) setWorkConfig((pros[0] as any).agendaSettings);
+          // Asistente
+          if(doctorId) {
+             const proSnap = await getDoc(doc(db, "professionals", doctorId));
+             if(proSnap.exists()) {
+                const proData = { id: proSnap.id, ...proSnap.data() };
+                setMyProfessionals([proData]);
+                setSelectedProfId(doctorId);
+                if((proData as any).agendaSettings) setWorkConfig((proData as any).agendaSettings);
+             }
           }
         }
       } catch (e) { console.error(e); }
     };
     loadContext();
-  }, [currentUserId, userRole]);
+  }, [currentUserId, userRole, doctorId]);
 
   useEffect(() => {
     if (!selectedProfId) return;
@@ -281,22 +286,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  const handleRegenerateMonth = async () => {
-    if (!currentMonthData) return;
-    if (!window.confirm("⚠️ ¿Actualizar horarios conservando citas existentes?")) return;
-    setLoading(true);
-    try {
-      const year = selectedDate.getFullYear();
-      const month = selectedDate.getMonth();
-      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-      const newSkeleton = generateMonthSkeleton(year, month, workConfig);
-      const mergedSlots = { ...newSkeleton };
-      Object.entries(currentMonthData).forEach(([key, oldSlot]) => { if (oldSlot.status !== 'available') mergedSlots[key] = oldSlot; });
-      await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { slots: mergedSlots, updatedAt: new Date() });
-      setCurrentMonthData(mergedSlots);
-    } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
-
   const handleReactivatePatient = async (patientId: string, patientName: string) => {
     if (!window.confirm(`¿Reactivar a ${patientName}?`)) return;
     setLoading(true);
@@ -310,7 +299,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // --- LOGICA GESTIÓN DE EVENTOS (Complex Logic V1) ---
+  // --- LOGICA GESTIÓN DE EVENTOS ---
 
   const detectConflicts = async (start: dayjs.Dayjs, end: dayjs.Dayjs): Promise<ConflictItem[]> => {
     const startMs = start.toDate().getTime();
@@ -444,7 +433,21 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
       } catch(e) { console.error(e); } finally { setLoading(false); }
   };
 
+  // CORRECCIÓN 2: Función faltante agregada
+  const openEditEvent = (event: AnnualEvent) => {
+      setEditingEventId(event.id);
+      setOriginalEventData(event);
+      setNewEventData({
+          start: dayjs(event.startDate),
+          end: dayjs(event.endDate),
+          title: event.title
+      });
+      setIsNewEventModalOpen(true);
+  };
+
   // --- LOGICA DE CITAS Y EDICIÓN ---
+
+  // CORRECCIÓN 3: Funciones duplicadas ELIMINADAS. Solo queda un bloque.
 
   const handleSaveAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -623,6 +626,17 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
 
   const handleOpenForm = (slotKey: string, slot: any) => {
       setTargetSlotKey(slotKey);
+      
+      // CORRECCIÓN 4: Buscar no-shows y asignarlos
+      let nsCount = 0;
+      if (slot.patientId) {
+          const p = patients.find(pat => pat.id === slot.patientId);
+          if (p && p.careTeam && p.careTeam[selectedProfId]) {
+              nsCount = p.careTeam[selectedProfId].noShowCount || 0;
+          }
+      }
+      setSelectedPatientNoShows(nsCount);
+
       setFormData({
           patientId: slot.patientId || '', patientName: slot.patientName || '',
           patientExternalPhone: slot.patientExternalPhone || '', patientExternalEmail: slot.patientExternalEmail || '',
@@ -827,7 +841,10 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
                       {annualEvents.filter(e => { const end = dayjs(e.endDate); return eventsTab === 'upcoming' ? end.isAfter(dayjs().subtract(1, 'day')) : end.isBefore(dayjs().subtract(1, 'day')); }).map(e => (
                           <div key={e.id} className="p-3 border border-slate-700 rounded bg-slate-800/50 flex justify-between items-center">
                               <div><div className="font-bold text-white">{e.title}</div><div className="text-xs text-slate-400">{dayjs(e.startDate).format('DD MMM')} - {dayjs(e.endDate).format('DD MMM YYYY')}</div></div>
-                              <button onClick={() => handleDeleteEvent(e)} className="text-red-400 hover:text-red-300">🗑️</button>
+                              <div className="flex gap-2">
+                                  <button onClick={() => openEditEvent(e)} className="text-blue-400 hover:text-blue-300">✏️</button>
+                                  <button onClick={() => handleDeleteEvent(e)} className="text-red-400 hover:text-red-300">🗑️</button>
+                              </div>
                           </div>
                       ))}
                   </div>
@@ -845,7 +862,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
             <DateSelectorRow label="Hasta:" dateValue={newEventData.end} onChange={(d) => setNewEventData({...newEventData, end: d})} />
             <div className="mb-4"><label className="block text-xs text-slate-400 mb-1">Título</label><input type="text" value={newEventData.title} onChange={e => setNewEventData({...newEventData, title: e.target.value})} className="w-full bg-slate-800 border border-slate-700 text-white rounded p-2" /></div>
             <div className="flex justify-end gap-2">
-                <button onClick={() => setIsNewEventModalOpen(false)} className="px-3 py-2 bg-slate-800 rounded text-slate-300">Cancelar</button>
+                <button onClick={() => { setIsNewEventModalOpen(false); setEditingEventId(null); }} className="px-3 py-2 bg-slate-800 rounded text-slate-300">Cancelar</button>
                 <button onClick={handleSaveEvent} className="px-3 py-2 bg-green-600 rounded text-white font-bold">Guardar</button>
             </div>
           </div>
