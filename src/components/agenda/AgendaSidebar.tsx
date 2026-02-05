@@ -7,15 +7,18 @@ interface AgendaSidebarProps {
   isMonthInitialized: boolean;
   onRegenerate: () => void;
   onInitialize: () => void;
+  
   // Estados de Paneles
   activeSidePanel: 'none' | 'needing' | 'waitlist';
   setActiveSidePanel: (panel: 'none' | 'needing' | 'waitlist') => void;
   isPausedSidebarOpen: boolean;
   setIsPausedSidebarOpen: (open: boolean) => void;
+  
   // Datos
   patientsNeedingAppt: any[];
   waitlist: any[];
   pausedList: any[];
+  
   // Funciones de acción
   onOpenPausedSidebar: () => void;
   onScheduleNeeding: (p: any) => void;
@@ -23,17 +26,72 @@ interface AgendaSidebarProps {
   onAddWaitlist: () => void;
   onDeleteWaitlist: (id: string) => void;
   onReactivatePatient: (id: string, name: string) => void;
+
+  // Prop para responsive
+  isMobile: boolean; 
 }
 
 const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
   onBack, onOpenConfig, onOpenEvents, isMonthInitialized, onRegenerate, onInitialize,
   activeSidePanel, setActiveSidePanel, isPausedSidebarOpen, setIsPausedSidebarOpen,
   patientsNeedingAppt, waitlist, pausedList,
-  onOpenPausedSidebar, onScheduleNeeding, onArchivePatient, onAddWaitlist, onDeleteWaitlist, onReactivatePatient
+  onOpenPausedSidebar, onScheduleNeeding, onArchivePatient, onAddWaitlist, onDeleteWaitlist, onReactivatePatient,
+  isMobile
 }) => {
+
+  // --- LÓGICA (Conservamos la mejora de V2) ---
+  const handleTogglePanel = (panel: 'needing' | 'waitlist') => {
+    setIsPausedSidebarOpen(false); 
+    if (activeSidePanel === panel) {
+      setActiveSidePanel('none');
+    } else {
+      setActiveSidePanel(panel);
+    }
+  };
+
+  const handleOpenPaused = () => {
+    setActiveSidePanel('none'); 
+    onOpenPausedSidebar();
+  };
+
+  // --- ESTILOS ---
+
+  // 1. Estilo del Contenedor Principal (Fusión V1 y V2)
+  const containerStyle: React.CSSProperties = {
+    // Si es móvil, ocupa el 100% de su contenedor padre (el drawer).
+    // Si es escritorio, impone su ancho de 280px (V1).
+    width: isMobile ? '100%' : '280px', 
+    height: '100%',
+    background: 'white',
+    display: 'flex',
+    flexDirection: 'column',
+    position: 'relative',
+    
+    // Restauramos bordes y sombras para escritorio (V1)
+    borderRight: isMobile ? 'none' : '1px solid #ddd', 
+    boxShadow: isMobile ? 'none' : '2px 0 5px rgba(0,0,0,0.05)',
+    zIndex: 20 
+  };
+
+  // 2. Estilo de Paneles Secundarios (V2)
+  const sidePanelStyle: React.CSSProperties = isMobile 
+    ? { 
+        // Móvil: Cubre todo el sidebar (Superposición)
+        position: 'absolute', inset: 0, 
+        background: 'white', zIndex: 30, display: 'flex', flexDirection: 'column' 
+      }
+    : { 
+        // Escritorio: Sale a la derecha (Expansión)
+        position: 'absolute', left: '100%', top: 0, bottom: 0, 
+        width: '320px', background: 'white', 
+        boxShadow: '5px 0 15px rgba(0,0,0,0.1)', zIndex: 19, 
+        borderRight: '1px solid #ddd', display: 'flex', flexDirection: 'column' 
+      };
+
   return (
-    <div style={{ width: '280px', background: 'white', borderRight: '1px solid #ddd', display:'flex', flexDirection:'column', zIndex: 20, position: 'relative', boxShadow: '2px 0 5px rgba(0,0,0,0.05)' }}>
+    <div style={containerStyle}>
       
+      {/* --- MENÚ PRINCIPAL --- */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
         <h3 style={{marginTop:0, color:'#333'}}>Opciones</h3>
         {onBack && <button onClick={onBack} style={{marginBottom:'20px', width:'100%', padding:'10px', cursor:'pointer', border:'1px solid #ccc', background:'white', borderRadius:'6px'}}> ⬅ Volver </button>}
@@ -51,7 +109,7 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
 
         {/* Botón Sin Cita */}
         <button
-          onClick={() => { setActiveSidePanel(activeSidePanel === 'needing' ? 'none' : 'needing'); setIsPausedSidebarOpen(false); }}
+          onClick={() => handleTogglePanel('needing')}
           style={{
             width:'100%', padding:'12px', marginBottom:'10px', borderRadius:'8px', cursor:'pointer',
             display:'flex', justifyContent:'space-between', alignItems:'center',
@@ -66,7 +124,7 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
 
         {/* Botón Lista Espera */}
         <button
-          onClick={() => { setActiveSidePanel(activeSidePanel === 'waitlist' ? 'none' : 'waitlist'); setIsPausedSidebarOpen(false); }}
+          onClick={() => handleTogglePanel('waitlist')}
           style={{
             width:'100%', padding:'12px', marginBottom:'10px', borderRadius:'8px', cursor:'pointer',
             display:'flex', justifyContent:'space-between', alignItems:'center',
@@ -81,7 +139,7 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
 
         {/* Botón Pausados */}
         <button
-          onClick={onOpenPausedSidebar}
+          onClick={handleOpenPaused}
           style={{
             width:'100%', padding:'12px', marginTop:'10px', borderRadius:'8px', cursor:'pointer',
             display:'flex', justifyContent:'space-between', alignItems:'center',
@@ -97,9 +155,10 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
         </button>
       </div>
 
-      {/* PANELES DESPLEGABLES (Lógica visual del sidebar) */}
+      {/* --- PANELES LATERALES DINÁMICOS --- */}
+      
       {activeSidePanel !== 'none' && (
-        <div style={{ position: 'absolute', left: '100%', top: 0, bottom: 0, width: '320px', background: 'white', boxShadow: '5px 0 15px rgba(0,0,0,0.1)', zIndex: 19, borderRight: '1px solid #ddd', display: 'flex', flexDirection: 'column' }}>
+        <div style={sidePanelStyle}>
           <div style={{padding:'20px', borderBottom:'1px solid #eee', background:'#fafafa', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
             <h3 style={{margin:0, color:'#333'}}>{activeSidePanel === 'needing' ? '⚠️ Requieren Cita' : '⏳ Lista de Espera'}</h3>
             <button onClick={() => setActiveSidePanel('none')} style={{border:'none', background:'none', fontSize:'18px', cursor:'pointer', color:'#999'}}>✕</button>
@@ -129,9 +188,8 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
         </div>
       )}
 
-      {/* PANEL DE PAUSADOS */}
       {isPausedSidebarOpen && (
-        <div style={{ position: 'absolute', left: '100%', top: 0, bottom: 0, width: '320px', background: 'white', boxShadow: '5px 0 15px rgba(0,0,0,0.1)', zIndex: 100, borderRight: '1px solid #ddd', display: 'flex', flexDirection: 'column' }}>
+        <div style={sidePanelStyle}>
           <div style={{padding:'20px', borderBottom:'1px solid #eee', background:'#fafafa', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
             <h3 style={{margin:0, color:'#616161', fontSize:'16px'}}>Pacientes Pausados</h3>
             <button onClick={() => setIsPausedSidebarOpen(false)} style={{border:'none', background:'none', fontSize:'18px', cursor:'pointer', color:'#999'}}>✕</button>
