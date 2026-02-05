@@ -31,6 +31,8 @@ interface Props {
   userRole: 'professional' | 'assistant';
   currentUserId: string;
   onBack?: () => void;
+  // --- CORRECCIÓN 1: Agregamos doctorId como opcional ---
+  doctorId?: string;
 }
 
 interface AnnualEvent {
@@ -93,14 +95,16 @@ const getDateFromSlotKey = (slotKey: string, year: number, month: number): Date 
   return new Date(year, month, day, h, m);
 };
 
-export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
+// --- CORRECCIÓN 1: Recibimos doctorId en los argumentos ---
+export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }: Props) {
   // --- RESPONSIVE STATE ---
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
   // --- CONTEXTO ---
   const [myProfessionals, setMyProfessionals] = useState<any[]>([]);
-  const [selectedProfId, setSelectedProfId] = useState<string>('');
+  // Si nos pasan un doctorId, lo usamos como valor inicial
+  const [selectedProfId, setSelectedProfId] = useState<string>(doctorId || '');
 
   // --- DATOS AGENDA ---
   const [currentMonthData, setCurrentMonthData] = useState<MonthlySlotMap | null>(null);
@@ -208,14 +212,21 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
           const pros = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           setMyProfessionals(pros);
           if (pros.length > 0) {
-            setSelectedProfId(pros[0].id);
-            if ((pros[0] as any).agendaSettings) setWorkConfig((pros[0] as any).agendaSettings);
+            // Si nos pasaron un doctorId específico desde App.tsx, intentamos mantenerlo si es válido
+            if (doctorId && pros.some(p => p.id === doctorId)) {
+                setSelectedProfId(doctorId);
+                const targetPro = pros.find(p => p.id === doctorId);
+                if ((targetPro as any).agendaSettings) setWorkConfig((targetPro as any).agendaSettings);
+            } else {
+                setSelectedProfId(pros[0].id);
+                if ((pros[0] as any).agendaSettings) setWorkConfig((pros[0] as any).agendaSettings);
+            }
           }
         }
       } catch (e) { console.error(e); }
     };
     loadContext();
-  }, [currentUserId, userRole]);
+  }, [currentUserId, userRole, doctorId]);
 
   useEffect(() => {
     if (!selectedProfId) return;
@@ -852,6 +863,8 @@ export default function AgendaMain({ userRole, currentUserId, onBack }: Props) {
           onAddWaitlist={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true); }}
           onDeleteWaitlist={handleDeleteWaitlistItem}
           onReactivatePatient={handleReactivatePatient}
+          // --- CORRECCIÓN 2: Pasamos isMobile ---
+          isMobile={isMobile}
         />
         {/* Botón cerrar sidebar en móvil */}
         {isMobile && showMobileSidebar && (
