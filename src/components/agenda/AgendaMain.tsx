@@ -31,7 +31,6 @@ interface Props {
   userRole: 'professional' | 'assistant';
   currentUserId: string;
   onBack?: () => void;
-  // --- CORRECCIÓN 1: Agregamos doctorId como opcional ---
   doctorId?: string;
 }
 
@@ -95,7 +94,6 @@ const getDateFromSlotKey = (slotKey: string, year: number, month: number): Date 
   return new Date(year, month, day, h, m);
 };
 
-// --- CORRECCIÓN 1: Recibimos doctorId en los argumentos ---
 export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }: Props) {
   // --- RESPONSIVE STATE ---
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -103,7 +101,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
 
   // --- CONTEXTO ---
   const [myProfessionals, setMyProfessionals] = useState<any[]>([]);
-  // Si nos pasan un doctorId, lo usamos como valor inicial
   const [selectedProfId, setSelectedProfId] = useState<string>(doctorId || '');
 
   // --- DATOS AGENDA ---
@@ -212,7 +209,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
           const pros = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           setMyProfessionals(pros);
           if (pros.length > 0) {
-            // Si nos pasaron un doctorId específico desde App.tsx, intentamos mantenerlo si es válido
             if (doctorId && pros.some(p => p.id === doctorId)) {
                 setSelectedProfId(doctorId);
                 const targetPro = pros.find(p => p.id === doctorId);
@@ -267,7 +263,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
       setActiveSidePanel('none');
       setIsPausedSidebarOpen(true);
       fetchPausedPatients();
-      if (isMobile) setShowMobileSidebar(true); // Ensure menu is visible on mobile
+      if (isMobile) setShowMobileSidebar(true);
   };
 
   const handleReactivatePatient = async (patientId: string, patientName: string) => {
@@ -755,7 +751,10 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   const openForm = (slotKey: string, slot: AgendaSlot) => {
     setTargetSlotKey(slotKey);
     setFormData({ patientId: slot.patientId || '', patientName: slot.patientName || (slot.status === 'blocked' ? 'BLOQUEADO' : ''), patientExternalPhone: slot.patientExternalPhone || '', patientExternalEmail: slot.patientExternalEmail || '', price: slot.price, adminNotes: slot.adminNotes || '', paymentStatus: slot.paymentStatus || 'pending', paymentMethod: slot.paymentMethod || 'cash' });
-    setSavePricePreference(false); setSelectedPatientNoShows(0); setIsFormOpen(true);
+    setSavePricePreference(false); setSelectedPatientNoShows(0); 
+    // --- CORRECCIÓN: CERRAR VISTA DE DÍA ---
+    setIsDayViewOpen(false);
+    setIsFormOpen(true);
   };
 
   const handleScheduleNeedingPatient = (p: any) => {
@@ -765,7 +764,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     setFormData({ patientId: p.id, patientName: p.fullName, patientExternalPhone: p.contactNumber || '', patientExternalEmail: p.email || '', price: price, adminNotes: '', paymentStatus: 'pending', paymentMethod: 'cash' });
     setSelectedPatientNoShows(ns);
     alert(`Has seleccionado a ${p.fullName}. Click en un espacio disponible.`);
-    if (isMobile) setShowMobileSidebar(false); // Close menu on mobile after selection
+    if (isMobile) setShowMobileSidebar(false);
   };
 
   const DateSelectorRow = ({ label, dateValue, onChange }: { label: string, dateValue: dayjs.Dayjs, onChange: (d: dayjs.Dayjs) => void }) => {
@@ -800,7 +799,15 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
               <div style={{fontWeight:'bold', color:'#555', minWidth:'50px'}}>{slot.time}</div>
               <div style={{flex:1}}>
                 {slot.status === 'available' ? (
-                  <div onClick={() => { if (isPast) { alert("Fecha pasada."); return; } if (formData.patientId && formData.patientName) { setTargetSlotKey(key); setIsFormOpen(true); } else { openForm(key, slot); } }}
+                  <div onClick={() => { 
+                      if (isPast) { alert("Fecha pasada."); return; } 
+                      if (formData.patientId && formData.patientName) { 
+                          setTargetSlotKey(key); 
+                          // --- CORRECCIÓN: CERRAR VISTA DE DÍA ---
+                          setIsDayViewOpen(false);
+                          setIsFormOpen(true); 
+                      } else { openForm(key, slot); } 
+                    }}
                     style={{ background: isPast ? '#f5f5f5' : '#F1F8E9', color: isPast ? '#aaa' : '#4CAF50', border: isPast ? '1px solid #ddd' : '1px dashed #4CAF50', padding:'8px', borderRadius:'6px', textAlign:'center', cursor: isPast ? 'not-allowed' : 'pointer' }}
                   > {isPast ? 'Tiempo transcurrido' : `+ Disponible ${formData.patientId && formData.patientName ? `(Agendar a ${formData.patientName})` : ''}`} </div>
                 ) : slot.status === 'blocked' ? (
@@ -863,10 +870,8 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
           onAddWaitlist={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true); }}
           onDeleteWaitlist={handleDeleteWaitlistItem}
           onReactivatePatient={handleReactivatePatient}
-          // --- CORRECCIÓN 2: Pasamos isMobile ---
           isMobile={isMobile}
         />
-        {/* Botón cerrar sidebar en móvil */}
         {isMobile && showMobileSidebar && (
            <button 
              onClick={() => setShowMobileSidebar(false)}
@@ -894,7 +899,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         {/* HEADER MORADO CON BOTÓN DE MENÚ */}
         <div style={{background: '#673AB7', color: 'white', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)'}}>
           
-          {/* BOTÓN HAMBURGUESA (SOLO MÓVIL) */}
           {isMobile && (
             <button 
               onClick={() => setShowMobileSidebar(true)}
@@ -943,7 +947,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         </div>
       </div>
 
-      {/* --- MODALES INLINE (Estos pueden refactorizarse en una fase 2) --- */}
+      {/* --- MODALES INLINE --- */}
       {isDayViewOpen && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'end', zIndex:100}}>
           <div style={{width: isMobile ? '100%' : '400px', background:'white', height:'100%', padding:'20px', display:'flex', flexDirection:'column', boxShadow:'-5px 0 20px rgba(0,0,0,0.1)'}}>
@@ -1018,7 +1022,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         onPatientSelect={handlePatientSelect}
       />
 
-      {/* MODAL ADD WAITLIST (Pequeño, se puede dejar aquí por ahora) */}
+      {/* MODAL ADD WAITLIST */}
       {isWaitlistFormOpen && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:30}}>
           <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'350px'}}>

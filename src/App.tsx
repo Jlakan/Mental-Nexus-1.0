@@ -65,7 +65,7 @@ export default function App() {
 
           // Verificar sub-perfiles según el rol
           if (data.role === 'patient') {
-            setProfileCompleted(data.profileCompleted || false);
+            setProfileCompleted(data.profileCompleted === true);
           } 
           else if (data.role === 'professional') {
             const proRef = doc(db, 'professionals', currentUser.uid);
@@ -141,7 +141,11 @@ export default function App() {
   if (activeRole === 'patient') {
       return (
         <>
-            {profileCompleted ? <PatientDashboard user={user} /> : <PatientRegister />}
+            {profileCompleted ? (
+                <PatientDashboard user={user} />
+            ) : (
+                <PatientRegister onComplete={() => setProfileCompleted(true)} />
+            )}
             <DevRoleSwitcher onSwitch={setSimulatedRole} />
         </>
       );
@@ -162,13 +166,9 @@ export default function App() {
       return (
         <>
             {!isRegisteredAssistant ? (
-                // 1. Si no tiene perfil, muestra registro
                 <AssistantRegister />
             ) : (
-                // 2. Si tiene perfil, muestra Panel o Agenda
                 <div className="flex flex-col h-screen bg-slate-950">
-                    
-                    {/* Botón flotante para volver (Solo visible si hay doctor seleccionado) */}
                     {selectedDoctorId && (
                     <div className="fixed top-4 left-4 z-50">
                         <button 
@@ -181,15 +181,13 @@ export default function App() {
                     )}
 
                     {selectedDoctorId ? (
-                    // VISTA DE AGENDA (Con la corrección aplicada)
                     <AgendaView 
                         userRole="assistant"
-                        currentUserId={user.uid}     // <--- TU ID (Asistente)
-                        doctorId={selectedDoctorId}  // <--- ID DEL DOCTOR (Objetivo)
+                        currentUserId={user.uid}
+                        doctorId={selectedDoctorId}
                         onBack={() => handleSelectDoctor(null)} 
                     />
                     ) : (
-                    // VISTA DE PANEL (Lista de doctores)
                     <AssistantPanel onSelectProfessional={handleSelectDoctor} />
                     )}
                 </div>
@@ -203,8 +201,6 @@ export default function App() {
   if (activeRole === 'admin') {
       return (
         <div className="relative min-h-screen">
-            
-            {/* Solo muestra el botón si users/{uid} tiene isAdmin: true */}
             {userData?.isAdmin === true && (
                 <div className="fixed bottom-6 right-20 z-40">
                     <button 
@@ -216,22 +212,18 @@ export default function App() {
                     </button>
                 </div>
             )}
-
-            {adminViewMode === 'admin' ? (
-                <AdminPanel />
-            ) : (
-                <ProfessionalDashboard user={user} />
-            )}
+            {adminViewMode === 'admin' ? <AdminPanel /> : <ProfessionalDashboard user={user} />}
             <DevRoleSwitcher onSwitch={setSimulatedRole} />
         </div>
       );
   }
 
-  // --- FALLBACK (Rol desconocido) ---
+  // --- FALLBACK (Rol Desconocido) ---
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-6 text-center">
       <h1 className="text-3xl text-red-500 font-bold mb-4">⚠️ Rol Desconocido</h1>
       <p className="mb-6 text-slate-400">Rol detectado: <strong>"{activeRole}"</strong></p>
+      
       <button
         onClick={async () => {
           if(!window.confirm("¿Seguro que deseas restablecer tu rol?")) return;
@@ -242,21 +234,21 @@ export default function App() {
       >
         🔄 Restablecer Cuenta
       </button>
-      <button onClick={() => auth.signOut()} className="underline text-slate-500 hover:text-white">
+
+      {/* ✅ RESTAURADO: Botón de Cerrar Sesión */}
+      <button onClick={() => auth.signOut()} className="underline text-slate-500 hover:text-white mt-4">
         Cerrar Sesión
       </button>
     </div>
   );
 }
 
-// Componente auxiliar para desarrollo
+// ✅ RESTAURADO: Estilos detallados en los botones (bordes de color)
 function DevRoleSwitcher({ onSwitch }: { onSwitch: (r: string | null) => void }) {
   return (
     <div className="fixed bottom-4 right-4 z-[9999] group">
       <div className="bg-slate-900/90 border border-cyan-500/30 p-2 rounded-lg backdrop-blur-md shadow-2xl opacity-60 hover:opacity-100 transition-all">
-        <div className="text-[10px] text-cyan-400 font-bold mb-1 text-center hidden group-hover:block">
-           DEV MODE
-        </div>
+        <div className="text-[10px] text-cyan-400 font-bold mb-1 text-center hidden group-hover:block">DEV MODE</div>
         <div className="flex flex-col gap-1 h-0 group-hover:h-auto overflow-hidden transition-all">
           <button onClick={() => onSwitch(null)} className="px-2 py-1 text-xs bg-slate-700 text-white rounded hover:bg-red-500">Reset</button>
           <div className="h-[1px] bg-slate-700 my-1"></div>
@@ -265,9 +257,7 @@ function DevRoleSwitcher({ onSwitch }: { onSwitch: (r: string | null) => void })
           <button onClick={() => onSwitch('patient')} className="px-2 py-1 text-xs bg-slate-800 text-green-400 rounded border border-green-900">User</button>
           <button onClick={() => onSwitch('assistant')} className="px-2 py-1 text-xs bg-slate-800 text-purple-400 rounded border border-purple-900">Asist</button>
         </div>
-        <div className="w-8 h-8 rounded-full bg-cyan-900/50 flex items-center justify-center text-cyan-400 border border-cyan-500 cursor-pointer">
-          ⚡
-        </div>
+        <div className="w-8 h-8 rounded-full bg-cyan-900/50 flex items-center justify-center text-cyan-400 border border-cyan-500 cursor-pointer">⚡</div>
       </div>
     </div>
   );

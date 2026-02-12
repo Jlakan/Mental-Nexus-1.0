@@ -42,9 +42,12 @@ const AppointmentForm: React.FC<AppointmentFormProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:20}}>
-      <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'400px', maxHeight:'90vh', overflowY:'auto'}}>
-        <h3>{formData.patientName ? 'Editar Cita' : 'Nueva Cita'}</h3>
+    // CAMBIO AQUI: zIndex subido a 2100 para forzar primer plano absoluto
+    <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:2100}}>
+      
+      {/* Contenedor del modal */}
+      <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'400px', maxHeight:'90vh', overflowY:'auto', boxShadow: '0 10px 25px rgba(0,0,0,0.5)'}}>
+        <h3 style={{marginTop: 0}}>{formData.patientName ? 'Editar Cita' : 'Nueva Cita'}</h3>
 
         {/* ALERTA DE FALTAS */}
         {selectedPatientNoShows > 0 && (

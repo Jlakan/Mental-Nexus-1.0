@@ -3,19 +3,24 @@ import { doc, setDoc, collection, query, where, getDocs } from "firebase/firesto
 import { auth, db } from '../services/firebase';
 import { INITIAL_PLAYER_PROFILE } from '../utils/GamificationUtils';
 
-export default function PatientRegister() {
+// 1. Definimos las Props para recibir onComplete
+interface Props {
+  user?: any;
+  onComplete: () => void;
+}
+
+export default function PatientRegister({ onComplete }: Props) {
   const [formData, setFormData] = useState({
     fullName: '',
     dob: '',
     phone: '',
     code: '',
-    securityPin: '' // Nuevo campo PIN
+    securityPin: ''
   });
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Lógica para el PIN: solo números, máximo 4
     if (e.target.name === 'securityPin') {
       const val = e.target.value.replace(/\D/g, '').slice(0, 4);
       setFormData({ ...formData, securityPin: val });
@@ -29,7 +34,6 @@ export default function PatientRegister() {
     setSaving(true);
     setErrorMsg('');
 
-    // Validación estricta del PIN
     if (formData.securityPin.length !== 4) {
       setErrorMsg("El PIN de seguridad debe tener exactamente 4 números.");
       setSaving(false);
@@ -41,15 +45,13 @@ export default function PatientRegister() {
     const email = auth.currentUser.email;
 
     try {
-      // 1. PREPARAR DATOS DE VINCULACIÓN
+      // --- LÓGICA DE VINCULACIÓN CON PROFESIONAL ---
       let initialCareTeam = {};
       let linkedProfessionalCode = null;
-      let isAuthorizedValue = true; // Por defecto autorizado si no usa código
+      let isAuthorizedValue = true;
 
       if (formData.code.trim()) {
         const cleanCode = formData.code.trim().toUpperCase();
-
-        // Buscar profesional por código
         const q = query(collection(db, "professionals"), where("professionalCode", "==", cleanCode));
         const docSnap = await getDocs(q);
 
@@ -57,21 +59,19 @@ export default function PatientRegister() {
           const profDoc = docSnap.docs[0];
           const profData = profDoc.data();
           const profId = profDoc.id;
-          const professionType = profData.professionType || 'psicologo';
-
+          
           linkedProfessionalCode = cleanCode;
           isAuthorizedValue = false; // Requiere aprobación si usa código
 
-          // Estructura plana para el equipo de cuidado
           initialCareTeam = {
             [profId]: {
-              status: 'active',           
+              status: 'active',
               active: true,               
               nextAppointment: null,
               joinedAt: new Date().toISOString(),
               professionalName: profData.fullName,
               professionalId: profId,
-              professionType: professionType,
+              professionType: profData.professionType || 'psicologo',
               contactNumber: formData.phone,
               noShowCount: 0,
               customPrice: profData.agendaSettings?.defaultPrice || 500
@@ -84,14 +84,14 @@ export default function PatientRegister() {
         }
       }
 
-      // 2. GUARDAR DOCUMENTO DEL PACIENTE
+      // --- 2. GUARDAR EN LA COLECCIÓN 'patients' (Ficha Médica) ---
       await setDoc(doc(db, "patients", uid), {
         uid: uid,
         fullName: formData.fullName,
         email: email,
         dob: formData.dob,
         contactNumber: formData.phone,
-        securityPin: formData.securityPin, // Guardamos el PIN
+        securityPin: formData.securityPin,
         createdAt: new Date(),
         gamificationProfile: INITIAL_PLAYER_PROFILE,
         careTeam: initialCareTeam,
@@ -100,8 +100,15 @@ export default function PatientRegister() {
         isManual: false
       });
 
-      // Redireccionar al Dashboard
-      window.location.href = '/';
+      // --- 3. CORRECCIÓN VITAL: ACTUALIZAR 'users' (Cuenta de Usuario) ---
+      // Esto marca que el registro terminó
+      await setDoc(doc(db, "users", uid), {
+        profileCompleted: true,
+        updatedAt: new Date()
+      }, { merge: true });
+
+      // --- 4. AVISAR A APP.TSX ---
+      onComplete();
 
     } catch (error: any) {
       console.error("Error al registrar:", error);
@@ -124,42 +131,20 @@ export default function PatientRegister() {
       <form onSubmit={handleSubmit} style={{display: 'flex', flexDirection: 'column', gap: '15px'}}>
         <div>
           <label style={{display:'block', marginBottom:'5px', fontWeight:'bold', fontSize:'13px', color:'#333'}}>Nombre Completo</label>
-          <input 
-            type="text" 
-            name="fullName" 
-            required 
-            value={formData.fullName} 
-            onChange={handleChange} 
-            style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }} 
-          />
+          <input type="text" name="fullName" required value={formData.fullName} onChange={handleChange} style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }} />
         </div>
         
         <div>
            <label style={{display:'block', marginBottom:'5px', fontWeight:'bold', fontSize:'13px', color:'#333'}}>Fecha de Nacimiento</label>
-           <input 
-             type="date" 
-             name="dob" 
-             required 
-             value={formData.dob} 
-             onChange={handleChange} 
-             style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }} 
-           />
+           <input type="date" name="dob" required value={formData.dob} onChange={handleChange} style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }} />
         </div>
 
         <div>
            <label style={{display:'block', marginBottom:'5px', fontWeight:'bold', fontSize:'13px', color:'#333'}}>Teléfono (WhatsApp)</label>
-           <input 
-             type="tel" 
-             name="phone" 
-             required 
-             placeholder="Para notificaciones" 
-             value={formData.phone} 
-             onChange={handleChange} 
-             style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }} 
-           />
+           <input type="tel" name="phone" required placeholder="Para notificaciones" value={formData.phone} onChange={handleChange} style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #ccc' }} />
         </div>
 
-        {/* --- CAMPO PIN DE SEGURIDAD (NUEVO) --- */}
+        {/* CAMPO PIN */}
         <div style={{ background: '#FFF3E0', padding: '10px', borderRadius: '6px', border: '1px solid #FFE0B2' }}>
           <label style={{display:'block', marginBottom:'5px', fontWeight:'bold', fontSize:'13px', color:'#E65100'}}>PIN de Seguridad (4 dígitos)</label>
           <input 
@@ -189,9 +174,6 @@ export default function PatientRegister() {
             onChange={handleChange} 
             style={{ width: '100%', padding: '10px', borderRadius:'4px', border:'1px solid #1565C0', fontWeight:'bold', textAlign:'center', textTransform:'uppercase' }} 
           />
-          <small style={{display:'block', marginTop:'5px', color:'#d32f2f', fontSize:'11px'}}>
-            * Al usar código, tu cuenta quedará pendiente de aprobación.
-          </small>
         </div>
 
         <button 
@@ -203,17 +185,11 @@ export default function PatientRegister() {
         </button>
       </form>
 
-      {/* --- SECCIÓN RECUPERADA (SIGN OUT) --- */}
       <div style={{marginTop: '25px', textAlign: 'center', borderTop: '1px solid #eee', paddingTop: '15px'}}>
-        <p style={{fontSize: '12px', color: '#777', marginBottom: '10px'}}>¿No eres tú o quieres cancelar?</p>
-        <button 
-          onClick={() => auth.signOut()} 
-          style={{ background:'none', border:'none', color:'#d32f2f', textDecoration: 'underline', cursor: 'pointer', fontSize: '14px' }}
-        >
+        <button onClick={() => auth.signOut()} style={{ background:'none', border:'none', color:'#d32f2f', textDecoration: 'underline', cursor: 'pointer', fontSize: '14px' }}>
           Cerrar Sesión / Cancelar Registro
         </button>
       </div>
-
     </div>
   );
 }
