@@ -381,6 +381,34 @@ export default function ProfessionalDashboard({ user }: Props) {
 
   if (loading) return <div className="min-h-screen bg-nexus-dark flex items-center justify-center text-nexus-cyan animate-pulse">CARGANDO SISTEMA CLÍNICO...</div>;
 
+  // --- NUEVA VALIDACIÓN DE SEGURIDAD (OPCIÓN B) ---
+  if (profData && profData.isAuthorized === false) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-4">
+        <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-md text-center border border-slate-700">
+          <div className="text-6xl mb-6">⏳</div>
+          <h1 className="text-2xl font-bold text-nexus-cyan mb-4">Cuenta en Revisión</h1>
+          <p className="text-slate-400 mb-6">
+            Tu perfil profesional ha sido registrado, pero requiere validación administrativa antes de acceder a la plataforma y gestionar pacientes.
+          </p>
+          <div className="bg-slate-900/50 p-4 rounded-lg mb-6 border border-slate-700/50">
+            <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Tu Código de Referencia</div>
+            <div className="font-mono text-xl font-bold text-white tracking-widest">
+              {profData.professionalCode || '---'}
+            </div>
+          </div>
+          <button
+            onClick={() => auth.signOut()}
+            className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors font-medium text-sm w-full"
+          >
+            Cerrar Sesión
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // ------------------------------------------------
+
   return (
     <div className="flex h-screen bg-nexus-dark text-slate-200 font-sans overflow-hidden">
 
