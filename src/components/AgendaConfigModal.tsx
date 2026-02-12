@@ -99,7 +99,8 @@ export default function AgendaConfigModal({ isOpen, onClose, currentConfig, onSa
   };
 
   return (
-    <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:50}}>
+    // SE ACTUALIZÓ EL ZINDEX A 2000 PARA QUE NO LO TAPE EL SIDEBAR
+    <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'center', alignItems:'center', zIndex: 2000}}>
       <div style={{background:'white', width:'700px', maxHeight:'90vh', borderRadius:'12px', display:'flex', flexDirection:'column', boxShadow:'0 10px 25px rgba(0,0,0,0.2)'}}>
 
         <div style={{padding:'20px', borderBottom:'1px solid #eee'}}>
