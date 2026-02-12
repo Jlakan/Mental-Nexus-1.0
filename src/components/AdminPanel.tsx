@@ -173,7 +173,7 @@ export default function AdminPanel() {
     if (!window.confirm("¿Autorizar a este profesional?")) return;
     try {
       await updateDoc(doc(db, "professionals", proUid), { isAuthorized: true });
-      await updateDoc(doc(db, "users", proUid), { role: 'pro' });
+      await updateDoc(doc(db, "users", proUid), { role: 'professional' });
       alert("Profesional autorizado correctamente.");
       fetchAll();
     } catch (e) { console.error(e); alert("Error al autorizar."); }
