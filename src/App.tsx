@@ -30,7 +30,7 @@ export default function App() {
   // 1. ESTADOS
   // ---------------------------------------------------------------------------
   const [user, setUser] = useState<any>(null);
-  const [userData, setUserData] = useState<any>(null);
+  const [userData, setUserData] = useState<any>(null); // Aquí viene el campo isAdmin
   const [loading, setLoading] = useState(true);
 
   // Estados de Verificación de Perfil
@@ -42,7 +42,7 @@ export default function App() {
   const [simulatedRole, setSimulatedRole] = useState<string | null>(null);
   const [adminViewMode, setAdminViewMode] = useState<'admin' | 'professional'>('admin');
   
-  // Persistencia del doctor seleccionado (LocalStorage)
+  // Persistencia del doctor seleccionado (LocalStorage) para Asistentes
   const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(() => {
     return localStorage.getItem('nexus_assistant_selected_doc');
   });
@@ -135,6 +135,7 @@ export default function App() {
     return <RoleSelection userName={user.displayName || 'Usuario'} onSelect={handleRoleSelect} />;
   }
 
+  // Si hay un rol simulado (Dev Mode), úsalo. Si no, usa el real.
   const activeRole = simulatedRole || userData.role;
 
   // --- ROL: PACIENTE ---
@@ -146,7 +147,9 @@ export default function App() {
             ) : (
                 <PatientRegister onComplete={() => setProfileCompleted(true)} />
             )}
-            <DevRoleSwitcher onSwitch={setSimulatedRole} />
+            
+            {/* SOLO SI ES ADMIN MUESTRA EL SWITCHER */}
+            {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
         </>
       );
   }
@@ -156,7 +159,9 @@ export default function App() {
       return (
         <>
             {isRegisteredPro ? <ProfessionalDashboard user={user} /> : <ProfessionalRegister />}
-            <DevRoleSwitcher onSwitch={setSimulatedRole} />
+            
+            {/* SOLO SI ES ADMIN MUESTRA EL SWITCHER */}
+            {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
         </>
       );
   }
@@ -192,7 +197,9 @@ export default function App() {
                     )}
                 </div>
             )}
-            <DevRoleSwitcher onSwitch={setSimulatedRole} />
+            
+            {/* SOLO SI ES ADMIN MUESTRA EL SWITCHER */}
+            {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
         </>
       );
   }
@@ -213,7 +220,9 @@ export default function App() {
                 </div>
             )}
             {adminViewMode === 'admin' ? <AdminPanel /> : <ProfessionalDashboard user={user} />}
-            <DevRoleSwitcher onSwitch={setSimulatedRole} />
+            
+            {/* SOLO SI ES ADMIN MUESTRA EL SWITCHER */}
+            {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
         </div>
       );
   }
@@ -235,7 +244,7 @@ export default function App() {
         🔄 Restablecer Cuenta
       </button>
 
-      {/* ✅ RESTAURADO: Botón de Cerrar Sesión */}
+      {/* Botón de Cerrar Sesión conservado */}
       <button onClick={() => auth.signOut()} className="underline text-slate-500 hover:text-white mt-4">
         Cerrar Sesión
       </button>
@@ -243,7 +252,7 @@ export default function App() {
   );
 }
 
-// ✅ RESTAURADO: Estilos detallados en los botones (bordes de color)
+// Componente auxiliar para desarrollo con estilos detallados conservados
 function DevRoleSwitcher({ onSwitch }: { onSwitch: (r: string | null) => void }) {
   return (
     <div className="fixed bottom-4 right-4 z-[9999] group">
