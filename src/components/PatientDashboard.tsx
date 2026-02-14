@@ -9,7 +9,7 @@ import {
   where, 
   getDocs, 
   updateDoc, 
-  arrayUnion, 
+ 
   arrayRemove, // <--- CRÍTICO: Necesario para desvincular
   increment, 
   serverTimestamp,
