@@ -174,13 +174,25 @@ export default function App() {
                 <AssistantRegister />
             ) : (
                 <div className="flex flex-col h-screen bg-slate-950">
+                    {/* BOTÓN FLOTANTE CORREGIDO */}
                     {selectedDoctorId && (
-                    <div className="fixed top-4 left-4 z-50">
+                    <div className="fixed bottom-6 left-6 z-[100]">
                         <button 
-                        onClick={() => handleSelectDoctor(null)}
-                        className="bg-slate-800/80 backdrop-blur text-purple-300 border border-purple-500/30 px-4 py-2 rounded-lg hover:bg-slate-700 transition-all flex items-center gap-2 shadow-lg"
+                          onClick={() => handleSelectDoctor(null)}
+                          className="flex items-center justify-center w-14 h-14 bg-slate-800 border border-slate-700 hover:border-cyan-400 text-cyan-400 rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.3)] hover:shadow-[0_0_15px_rgba(34,211,238,0.4)] transition-all active:scale-95 group"
+                          aria-label="Volver a mis doctores"
+                          title="Volver a mis doctores"
                         >
-                        <span>⬅</span> Volver a mis Doctores
+                          <svg 
+                            xmlns="http://www.w3.org/2000/svg" 
+                            fill="none" 
+                            viewBox="0 0 24 24" 
+                            strokeWidth={2.5} 
+                            stroke="currentColor" 
+                            className="w-6 h-6 group-hover:-translate-x-1 transition-transform"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                          </svg>
                         </button>
                     </div>
                     )}
