@@ -92,9 +92,9 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
     <div style={containerStyle}>
       
       {/* --- MENÚ PRINCIPAL --- */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+      {/* Añadimos paddingBottom: '80px' para que el botón flotante no tape las últimas opciones */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', paddingBottom: '80px' }}>
         <h3 style={{marginTop:0, color:'#333'}}>Opciones</h3>
-        {onBack && <button onClick={onBack} style={{marginBottom:'20px', width:'100%', padding:'10px', cursor:'pointer', border:'1px solid #ccc', background:'white', borderRadius:'6px'}}> ⬅ Volver </button>}
 
         <button onClick={onOpenConfig} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'white', border:'1px solid #ccc', borderRadius:'6px', cursor:'pointer', textAlign:'left'}}>⚙️ Configurar</button>
         <button onClick={onOpenEvents} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'#F3E5F5', border:'1px solid #E1BEE7', color:'#7B1FA2', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', textAlign:'left'}}>📅 Mis Eventos</button>
@@ -204,6 +204,21 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
           </div>
         </div>
       )}
+
+      {/* --- BOTÓN FLOTANTE PARA REGRESAR A MIS DOCTORES --- */}
+      {onBack && (
+        <button 
+          onClick={onBack} 
+          className="absolute bottom-6 left-6 z-50 flex items-center justify-center p-4 bg-slate-800 border border-slate-700 hover:border-cyan-400 text-cyan-400 rounded-full shadow-lg hover:shadow-[0_0_15px_rgba(34,211,238,0.3)] transition-all group"
+          aria-label="Regresar a mis doctores"
+          title="Regresar a mis doctores"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6 group-hover:-translate-x-1 transition-transform">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+          </svg>
+        </button>
+      )}
+
     </div>
   );
 };
