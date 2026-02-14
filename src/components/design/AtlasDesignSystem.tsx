@@ -5,7 +5,7 @@ import React from 'react';
 // 1. ICONOS (ATLAS ICONS)
 // =============================================================================
 
-// Componente base para los iconos SVG para mantener tamaño y estilo consistente
+// Componente base para los iconos SVG para mantener consistencia
 const IconBase = ({ path, className = "", size = 24, ...props }: any) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -25,7 +25,18 @@ const IconBase = ({ path, className = "", size = 24, ...props }: any) => (
 );
 
 export const AtlasIcons = {
-  // UI Básico
+  // --- ICONO DE IMAGEN (Rescatado de V2) ---
+  Check: ({ size = 24, className = "", ...props }: any) => (
+    <img 
+      src="/assets/missión Succes.png" 
+      alt="Misión Completada"
+      style={{ width: size, height: size }}
+      className={`inline-block object-contain ${className}`}
+      {...props}
+    />
+  ),
+
+  // --- UI BÁSICO (Rescatado de V1 y V2) ---
   User: (props: any) => (
     <IconBase {...props} path={
       <>
@@ -55,7 +66,7 @@ export const AtlasIcons = {
       </>
     } />
   ),
-  Menu: (props: any) => (
+  Menu: (props: any) => ( // RESCATADO DE V1
     <IconBase {...props} path={
       <>
         <line x1="3" y1="12" x2="21" y2="12" />
@@ -81,28 +92,25 @@ export const AtlasIcons = {
     } />
   ),
 
-  // RPG / Stats / Gamificación
+  // --- RPG / GAMIFICACIÓN ---
   Zap: (props: any) => (
     <IconBase {...props} path={
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     } />
-  ), // Energía/XP
-  
+  ),
   Brain: (props: any) => (
     <IconBase {...props} path={
       <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z" />
     } />
   ),
-  
   Heart: (props: any) => (
     <IconBase {...props} path={
       <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
     } />
   ),
-
-  Sword: (props: any) => (
+  Sword: (props: any) => ( // RESCATADO DE V1
     <IconBase {...props} path={
-      <> {/* Aquí estaba el error, ahora corregido con Fragments */}
+      <>
         <path d="M14.5 17.5L3 6V3h3l11.5 11.5" />
         <path d="M13 19l6-6" />
         <path d="M16 16l4 4" />
@@ -110,7 +118,6 @@ export const AtlasIcons = {
       </>
     } />
   ),
-  
   Target: (props: any) => (
     <IconBase {...props} path={
       <>
@@ -126,18 +133,14 @@ export const AtlasIcons = {
 // 2. COMPONENTES UI (ATLAS UI)
 // =============================================================================
 
-// --- TARJETAS ---
-export const AtlasCard = ({ children, className = "", noPadding = false }: any) => {
-  return (
-    <div className={`bg-slate-800/80 backdrop-blur-md border border-slate-700 rounded-xl shadow-xl overflow-hidden ${className}`}>
-      <div className={noPadding ? "" : "p-6"}>
-        {children}
-      </div>
+export const AtlasCard = ({ children, className = "", noPadding = false }: any) => (
+  <div className={`bg-slate-800/80 backdrop-blur-md border border-slate-700 rounded-xl shadow-xl overflow-hidden ${className}`}>
+    <div className={noPadding ? "" : "p-6"}>
+      {children}
     </div>
-  );
-};
+  </div>
+);
 
-// --- BOTONES ---
 interface AtlasButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
   isLoading?: boolean;
@@ -168,7 +171,6 @@ export const AtlasButton = ({ children, variant = 'primary', className = "", isL
   );
 };
 
-// --- TEXTOS ---
 export const AtlasText = ({ children, variant = 'body', className = "" }: any) => {
   const styles: any = {
     h1: "text-3xl md:text-4xl font-bold text-white tracking-tight",
@@ -177,11 +179,10 @@ export const AtlasText = ({ children, variant = 'body', className = "" }: any) =
     body: "text-slate-300 leading-relaxed",
     code: "font-mono text-xs text-cyan-400/80 tracking-widest uppercase"
   };
-
   return <div className={`${styles[variant]} ${className}`}>{children}</div>;
 };
 
-// --- INPUTS ---
+// --- INPUTS (RESCATADO DE V1) ---
 export const AtlasInput = ({ label, icon, ...props }: any) => {
   return (
     <div className="mb-4">

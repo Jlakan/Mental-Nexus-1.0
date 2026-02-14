@@ -1,318 +1,507 @@
 // src/components/PatientDashboard.tsx
+
 import { useState, useEffect } from 'react';
-import {
-  doc, getDoc, collection, query, getDocs, // <--- FIX: Se eliminó 'where'
-  updateDoc, increment, deleteField, serverTimestamp,
-  writeBatch
-} from "firebase/firestore";
-import { auth, db } from '../services/firebase';
-import { calculateLevel } from '../utils/GamificationUtils';
-import TaskValidationModal from './TaskValidationModal';
-import PlayerStatusCard from './PlayerStatusCard';
+import { 
+  doc, 
+  getDoc, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  updateDoc, 
+  arrayUnion, 
+  arrayRemove, // <--- CRÍTICO: Necesario para desvincular
+  increment, 
+  serverTimestamp,
+  Timestamp 
+} from 'firebase/firestore';
+import { db, auth } from '../services/firebase';
+import { AtlasCard, AtlasButton, AtlasIcons } from './design/AtlasDesignSystem';
 
-import type { Assignment } from '../utils/ClinicalEngine';
+// --- INTERFACES ---
+interface PatientDashboardProps {
+  user: any;
+}
 
-// --- HELPERS DE FECHA ---
-const getDayKey = (date: Date): string => {
-  const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-  return days[date.getDay()];
+// --- HELPERS ---
+const isSameDay = (d1: Date, d2: Date) => {
+  return d1.getFullYear() === d2.getFullYear() &&
+         d1.getMonth() === d2.getMonth() &&
+         d1.getDate() === d2.getDate();
 };
 
-const getCurrentWeekDates = () => {
-  const current = new Date();
-  const day = current.getDay();
-  const diffToMonday = current.getDate() - day + (day === 0 ? -6 : 1); 
-  const monday = new Date(current.setDate(diffToMonday));
-  const week = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    week.push(d);
-  }
-  return week;
-};
-
-const DAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-
-interface Props { user?: any; }
-
-export default function PatientDashboard({ user }: Props) {
-  const [patientData, setPatientData] = useState<any>(null);
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
+export default function PatientDashboard({ user }: PatientDashboardProps) {
+  // ---------------------------------------------------------------------------
+  // 1. ESTADOS
+  // ---------------------------------------------------------------------------
   const [loading, setLoading] = useState(true);
-  const [selectedTask, setSelectedTask] = useState<{ task: Assignment, dateStr: string } | null>(null);
-  const [weekDates] = useState(getCurrentWeekDates());
-  const [linkedProfessionals, setLinkedProfessionals] = useState<any[]>([]);
+  const [patientData, setPatientData] = useState<any>(null);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [professionals, setProfessionals] = useState<any[]>([]);
+  
+  // Modal State
+  const [selectedTask, setSelectedTask] = useState<any>(null);
+  const [reflection, setReflection] = useState('');
+  const [rating, setRating] = useState(5);
+  const [submittingTask, setSubmittingTask] = useState(false);
 
+  // ---------------------------------------------------------------------------
+  // 2. CARGA DE DATOS (Data Fetching)
+  // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!user) return;
-    const loadData = async () => {
+    const fetchData = async () => {
+      if (!user) return;
       setLoading(true);
+
       try {
-        const userRef = doc(db, "users", user.uid);
+        // A) Perfil del Usuario
+        const userRef = doc(db, 'users', user.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
           setPatientData(userSnap.data());
-          if (userSnap.data().permissions) {
-            const perms = userSnap.data().permissions;
-            const proIds = Object.keys(perms);
-            const proPromises = proIds.map(pid => getDoc(doc(db, "users", pid)));
-            const proSnaps = await Promise.all(proPromises);
-            const pros = proSnaps.map(s => ({ id: s.id, ...s.data() }));
-            setLinkedProfessionals(pros);
-          }
         }
-        const q = query(collection(db, "users", user.uid, "assignments"));
-        const tasksSnap = await getDocs(q);
-        const tasksList = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() } as Assignment));
-        setAssignments(tasksList);
+
+        // B) Tareas (Assignments)
+        // Buscamos en la subcolección del usuario (Patrón V1) para máxima compatibilidad
+        const tasksRef = collection(db, 'users', user.uid, 'assignments');
+        const tasksSnap = await getDocs(tasksRef);
+        const loadedTasks = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setTasks(loadedTasks);
+
+        // C) Profesionales Vinculados
+        // Asumiendo que 'professionals' es una colección raíz y tienen un array 'patients'
+        const profsQuery = query(collection(db, 'users'), where('role', '==', 'professional'), where('patients', 'array-contains', user.uid));
+        // NOTA: Si usabas una estructura diferente en V1 para profesionales, ajusta esta query.
+        // Por ahora intentamos buscar en la colección de usuarios general filtrando por rol.
+        const profsSnap = await getDocs(profsQuery);
+        setProfessionals(profsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
       } catch (error) {
         console.error("Error cargando dashboard:", error);
       } finally {
         setLoading(false);
       }
     };
-    loadData();
+
+    fetchData();
   }, [user]);
 
-  const handleTaskClick = (task: Assignment, date: Date) => {
-    const dateStr = date.toISOString().split('T')[0];
-    const history = (task.completionHistory as any) || {};
-    
-    if (history[dateStr]) {
-      alert("¡Ya completaste esta misión hoy!");
-      return;
-    }
-    setSelectedTask({ task, dateStr });
+  // ---------------------------------------------------------------------------
+  // 3. LÓGICA DE NEGOCIO
+  // ---------------------------------------------------------------------------
+
+  // A. Gamificación
+  const currentXP = patientData?.gamification?.xp || 0;
+  const currentLevel = Math.floor(currentXP / 100) + 1;
+  const xpProgress = currentXP % 100;
+  
+  // Mapeo seguro de Stats (V1 DB -> V2 UI)
+  const dbStats = patientData?.gamification?.stats || {};
+  const uiStats = {
+    psique: dbStats.INT || dbStats.intellect || 0,      // Inteligencia
+    vitalidad: dbStats.STR || dbStats.strength || 0,    // Fuerza
+    resiliencia: dbStats.STA || dbStats.stamina || 0    // Aguante
   };
 
-  const handleDecision = async (decision: { type: 'success' | 'escape', payload?: any }) => {
+  // B. Filtrado de Tareas (Lógica Híbrida V1/V2)
+  const getTodaysTasks = () => {
+    const today = new Date();
+    const daysV1 = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayKey = daysV1[today.getDay()]; 
+
+    return tasks.filter((task: any) => {
+      // 1. Verificar si está activa (opcional, si tienes campo isActive)
+      if (task.status === 'inactive') return false;
+
+      // 2. Verificar frecuencia
+      if (task.frequency) {
+        if (Array.isArray(task.frequency)) {
+            return task.frequency.includes(dayKey); // Nuevo formato
+        } else if (typeof task.frequency === 'object') {
+            return task.frequency[dayKey] === true; // Viejo formato V1
+        }
+      }
+      return true; // Si no hay frecuencia, se asume diario
+    });
+  };
+
+  const todaysTasks = getTodaysTasks();
+
+  // C. Completar Tarea
+  const handleCompleteTask = async () => {
     if (!selectedTask || !user) return;
-
-    const { task, dateStr } = selectedTask;
-    const taskRef = doc(db, "users", user.uid, "assignments", task.id);
-    const userRef = doc(db, "users", user.uid);
-
-    // FIX: Creamos una referencia tipada como 'any' para acceder a xp/gold/stats sin errores de TS
-    const taskDataAny = task.staticTaskData as any;
+    setSubmittingTask(true);
 
     try {
-      const batch = writeBatch(db); 
-
-      if (decision.type === 'success') {
-        batch.update(taskRef, {
-          [`completionHistory.${dateStr}`]: {
-            completedAt: new Date().toISOString(),
-            rating: decision.payload.rating,
-            reflection: decision.payload.reflection,
-            status: 'completed'
-          },
-          lastCompletedAt: serverTimestamp()
-        });
-
-        // FIX: Usamos la variable auxiliar taskDataAny para evitar error TS2339
-        const xpReward = taskDataAny?.xp || 10;
-        const goldReward = taskDataAny?.gold || 5;
-
-        batch.update(userRef, {
-          "gamification.xp": increment(xpReward),
-          "gamification.gold": increment(goldReward),
-          "gamification.completedMissions": increment(1)
-        });
-
-        // FIX: Verificación con casting a any
-        if (taskDataAny?.stats) {
-             const statKey = `gamification.stats.${taskDataAny.stats}`; 
-             batch.update(userRef, { [statKey]: increment(1) });
-        }
-
-      } else {
-        console.log("Escape usado:", decision.payload.motive);
-      }
-
-      await batch.commit();
+      const taskRef = doc(db, 'users', user.uid, 'assignments', selectedTask.id);
+      const userRef = doc(db, 'users', user.uid);
       
+      const xpReward = (selectedTask.staticTaskData?.xp || 10);
+      const dateStr = new Date().toISOString().split('T')[0];
+
+      // 1. Actualizar Tarea
+      await updateDoc(taskRef, {
+        [`completionHistory.${dateStr}`]: {
+            completedAt: new Date().toISOString(),
+            rating: rating,
+            reflection: reflection,
+            status: 'completed'
+        },
+        lastCompletedAt: serverTimestamp() // Importante para la validación de fecha
+      });
+
+      // 2. Actualizar Usuario (XP, Oro, Stats)
+      await updateDoc(userRef, {
+        'gamification.xp': increment(xpReward),
+        'gamification.gold': increment(5),
+        'gamification.completedMissions': increment(1)
+        // Aquí podrías agregar lógica para subir stats específicos según el tipo de tarea
+      });
+
+      // 3. Actualización Optimista (UI Local)
       setPatientData((prev: any) => ({
         ...prev,
         gamification: {
-            ...prev?.gamification,
-            // FIX: Casting a any también aquí para la actualización optimista
-            xp: (prev?.gamification?.xp || 0) + (decision.type === 'success' ? ((task.staticTaskData as any)?.xp || 10) : 0)
+          ...prev.gamification,
+          xp: (prev.gamification?.xp || 0) + xpReward
         }
       }));
 
+      // 4. Actualizar la tarea localmente para bloquearla inmediatamente
+      setTasks(prev => prev.map(t => {
+        if (t.id === selectedTask.id) {
+            return { ...t, lastCompletedAt: Timestamp.now() }; // Simulamos el timestamp
+        }
+        return t;
+      }));
+
       setSelectedTask(null);
-      window.location.reload(); 
+      setReflection('');
+      setRating(5);
 
     } catch (error) {
-      console.error("Error guardando progreso:", error);
-      alert("Error guardando progreso");
+      console.error("Error completando misión:", error);
+      alert("Error de conexión al servidor neural.");
+    } finally {
+      setSubmittingTask(false);
     }
   };
 
-  const handleRevokeAccess = async (profId: string, profName: string) => {
-    if (!window.confirm(`¿Seguro que quieres desconectar a ${profName}?`)) return;
-    try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, {
-            [`permissions.${profId}`]: deleteField()
-        });
-        alert("Acceso revocado correctamente.");
-        window.location.reload();
-    } catch (e) {
-        console.error(e);
-        alert("Error al revocar");
-    }
+  // D. Desvincular Profesional
+  const handleUnlinkProfessional = async (profId: string) => {
+      if(!window.confirm("¿Seguro que deseas cortar el enlace con este especialista?")) return;
+      try {
+          // Asumiendo que el ID del documento del profesional es profId
+          const profRef = doc(db, 'users', profId); 
+          
+          await updateDoc(profRef, {
+              patients: arrayRemove(user.uid) // <--- CORREGIDO: arrayRemove
+          });
+          
+          // Eliminar permiso en el documento del usuario (si V1 lo usaba)
+          const userRef = doc(db, 'users', user.uid);
+          await updateDoc(userRef, {
+            [`permissions.${profId}`]: serverTimestamp() // O deleteField() si usas 'deleteField' importado
+          });
+
+          // Actualizar UI
+          setProfessionals(prev => prev.filter(p => p.id !== profId));
+          alert("Enlace neural cortado correctamente.");
+      } catch (e) {
+          console.error(e);
+          alert("Error al desvincular. Verifica tu conexión.");
+      }
   };
 
-  const currentXp = patientData?.gamification?.xp || 0;
-  const levelInfo = calculateLevel(currentXp);
-  const currentStats = patientData?.gamification?.stats || { STR: 0, INT: 0, STA: 0, DEX: 0 };
+  // ---------------------------------------------------------------------------
+  // 4. RENDERIZADO (DISEÑO ATLAS V2)
+  // ---------------------------------------------------------------------------
 
-  if (loading) return <div className="p-10 text-center text-gray-500">Cargando tu aventura...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-cyan-500 gap-4">
+        <AtlasIcons.Zap className="animate-spin w-12 h-12" />
+        <span className="font-mono animate-pulse tracking-widest text-sm">SINCRONIZANDO NEXUS...</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans pb-20">
+    <div className="min-h-screen bg-slate-900 text-slate-200 pb-20 font-sans selection:bg-cyan-500/30">
       
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center mb-6">
-         <div>
-            <h1 className="text-xl font-bold text-gray-800">
-                Hola, {patientData?.fullName?.split(' ')[0] || 'Viajero'}
-            </h1>
-            <p className="text-xs text-gray-500">
-                {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long'})}
-            </p>
-         </div>
-         <button onClick={() => auth.signOut()} className="text-sm text-red-500 font-semibold hover:bg-red-50 px-3 py-1 rounded-lg transition-colors">
-            Salir
-         </button>
-      </div>
-
-      <div className="max-w-3xl mx-auto px-4">
-        
-        <PlayerStatusCard 
-            level={levelInfo.level}
-            currentXp={levelInfo.currentLevelXp}
-            requiredXp={levelInfo.requiredXp}
-            progressPercent={levelInfo.progressPercent}
-            stats={currentStats}
-        />
-
-        <h3 className="text-lg font-bold text-gray-700 mb-4 flex items-center gap-2">
-            <span>📅</span> Misiones de la Semana
-        </h3>
-
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden overflow-x-auto">
-            <table className="w-full text-sm text-left">
-                <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200">
-                    <tr>
-                        <th className="px-4 py-3">Misión</th>
-                        {weekDates.map((d, i) => (
-                            <th key={i} className="px-2 py-3 text-center min-w-[40px]">
-                                {DAY_LABELS[i]}
-                                <div className="text-[10px] font-normal">{d.getDate()}</div>
-                            </th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                    {assignments.map(task => {
-                        const isRoutine = task.type === 'routine';
-                        const frequency = (task.frequency as any) || {};
-
-                        // FIX: Añadido casting para acceder al título de forma segura si difiere del tipo base
-                        const title = (task.staticTaskData as any)?.title || task.staticTaskData?.title || task.title;
-
-                        return (
-                            <tr key={task.id} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-4 py-3">
-                                    <div className="font-bold text-gray-800">
-                                        {title}
-                                    </div>
-                                    <div className="text-xs text-gray-400 truncate max-w-[150px]">
-                                        {isRoutine ? 'Rutina Diaria' : 'Misión Única'}
-                                    </div>
-                                </td>
-                                
-                                {weekDates.map((date, i) => {
-                                    const dayKey = getDayKey(date);
-                                    const isScheduled = isRoutine ? frequency[dayKey] : true; 
-                                    
-                                    const dateStr = date.toISOString().split('T')[0];
-                                    const completedData = (task.completionHistory as any)?.[dateStr];
-                                    const isCompleted = !!completedData;
-
-                                    if (!isScheduled) {
-                                        return <td key={i} className="bg-gray-50"></td>;
-                                    }
-
-                                    return (
-                                        <td key={i} className="p-1 text-center align-middle">
-                                            <button
-                                                onClick={() => handleTaskClick(task, date)}
-                                                disabled={isCompleted}
-                                                className={`
-                                                    w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all shadow-sm
-                                                    ${isCompleted 
-                                                        ? 'bg-green-100 text-green-600 border border-green-200 cursor-default' 
-                                                        : 'bg-white border-2 border-gray-300 text-gray-300 hover:border-purple-500 hover:text-purple-500 hover:shadow-md cursor-pointer'
-                                                    }
-                                                `}
-                                                title={isCompleted ? '¡Completada!' : 'Click para completar'}
-                                            >
-                                                {isCompleted ? '✓' : ''}
-                                            </button>
-                                        </td>
-                                    );
-                                })}
-                            </tr>
-                        );
-                    })}
-
-                    {assignments.length === 0 && (
-                        <tr>
-                            <td colSpan={8} className="p-8 text-center text-gray-400 italic">
-                                No tienes misiones activas por ahora. ¡Descansa! 💤
-                            </td>
-                        </tr>
-                    )}
-                </tbody>
-            </table>
-        </div>
-
-        <div className="mt-10 mb-10 border-t border-gray-200 pt-6">
-            <h4 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Tu Equipo de Salud</h4>
-            <div className="grid gap-4 sm:grid-cols-2">
-                {linkedProfessionals.map((prof) => (
-                    <div key={prof.id} className="flex justify-between items-center p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
-                        <div>
-                            <p className="font-bold text-gray-700 text-sm">{prof.fullName || 'Profesional'}</p>
-                            <p className="text-xs text-purple-600 font-medium">Psicólogo / Terapeuta</p>
-                        </div>
-                        <button 
-                            onClick={() => handleRevokeAccess(prof.id, prof.fullName)}
-                            className="text-xs text-red-500 hover:bg-red-50 px-3 py-1 rounded border border-transparent hover:border-red-100 transition-all"
-                        >
-                            Desvincular
-                        </button>
-                    </div>
-                ))}
-                {linkedProfessionals.length === 0 && (
-                    <p className="text-sm text-gray-400">No estás vinculado a ningún profesional aún.</p>
-                )}
+      {/* --- HEADER --- */}
+      <header className="sticky top-0 z-30 bg-slate-900/80 backdrop-blur-md border-b border-slate-700 px-4 py-3 flex justify-between items-center">
+        <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-600 to-blue-700 flex items-center justify-center border-2 border-slate-800 shadow-lg relative">
+                <span className="text-lg font-bold text-white uppercase">
+                    {patientData?.fullName ? patientData.fullName[0] : user.email[0]}
+                </span>
+                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border border-slate-900"></div>
+            </div>
+            <div>
+                <h2 className="text-sm font-bold text-white leading-none">
+                    {patientData?.fullName || 'Sujeto 01'}
+                </h2>
+                <span className="text-[10px] text-cyan-400 font-mono tracking-wider">ESTADO: ONLINE</span>
             </div>
         </div>
+        <button 
+            onClick={() => auth.signOut()} 
+            className="p-2 rounded-lg hover:bg-red-900/20 text-slate-500 hover:text-red-400 transition-colors"
+            title="Desconectar"
+        >
+            <AtlasIcons.Lock size={18} />
+        </button>
+      </header>
 
-      </div>
+      <main className="max-w-3xl mx-auto p-4 space-y-6">
 
-      <TaskValidationModal
-        isOpen={!!selectedTask}
-        // FIX: Casting para evitar errores si staticTaskData no tiene las propiedades esperadas
-        taskTitle={(selectedTask?.task?.staticTaskData as any)?.title || selectedTask?.task?.title || "Misión"}
-        onClose={() => setSelectedTask(null)}
-        onConfirmSuccess={(rating, reflection) => handleDecision({ type: 'success', payload: { rating, reflection } })}
-        onConfirmEscape={(reasonId) => handleDecision({ type: 'escape', payload: { motive: reasonId } })}
-      />
+        {/* --- SECCIÓN 1: PROGRESO --- */}
+        <section className="relative mt-2">
+            <div className="flex justify-between items-end mb-2">
+                <div>
+                    <span className="text-xs text-slate-400 uppercase tracking-widest">Nivel de Sincronización</span>
+                    <div className="text-3xl font-black text-white flex items-baseline gap-1">
+                        {currentLevel} <span className="text-sm text-slate-500 font-normal">/ {patientData?.gamification?.title || "INICIADO"}</span>
+                    </div>
+                </div>
+                <div className="text-right">
+                    <span className="text-xs text-cyan-400 font-mono">XP: {Math.floor(xpProgress)}%</span>
+                </div>
+            </div>
+            <div className="h-4 bg-slate-800 rounded-full overflow-hidden border border-slate-700 relative shadow-inner">
+                <div 
+                    className="h-full bg-gradient-to-r from-cyan-600 to-blue-500 transition-all duration-1000 ease-out relative"
+                    style={{ width: `${xpProgress}%` }}
+                >
+                    <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                </div>
+            </div>
+        </section>
+
+        {/* --- SECCIÓN 2: HUD STATS --- */}
+        <div className="grid grid-cols-3 gap-3">
+            <AtlasCard noPadding className="bg-slate-800/50 border-t-2 border-t-transparent hover:border-t-purple-500 transition-all">
+                <div className="p-3 text-center flex flex-col items-center gap-2">
+                    <div className="p-2 rounded-lg bg-slate-900 text-purple-400"><AtlasIcons.Brain /></div>
+                    <div>
+                        <div className="text-xl font-bold text-white">{uiStats.psique}</div>
+                        <div className="text-[9px] text-slate-500 font-mono uppercase">PSIQUE</div>
+                    </div>
+                </div>
+            </AtlasCard>
+            <AtlasCard noPadding className="bg-slate-800/50 border-t-2 border-t-transparent hover:border-t-red-500 transition-all">
+                <div className="p-3 text-center flex flex-col items-center gap-2">
+                    <div className="p-2 rounded-lg bg-slate-900 text-red-400"><AtlasIcons.Heart /></div>
+                    <div>
+                        <div className="text-xl font-bold text-white">{uiStats.vitalidad}</div>
+                        <div className="text-[9px] text-slate-500 font-mono uppercase">VITALIDAD</div>
+                    </div>
+                </div>
+            </AtlasCard>
+            <AtlasCard noPadding className="bg-slate-800/50 border-t-2 border-t-transparent hover:border-t-blue-500 transition-all">
+                <div className="p-3 text-center flex flex-col items-center gap-2">
+                    <div className="p-2 rounded-lg bg-slate-900 text-blue-400"><AtlasIcons.Shield /></div>
+                    <div>
+                        <div className="text-xl font-bold text-white">{uiStats.resiliencia}</div>
+                        <div className="text-[9px] text-slate-500 font-mono uppercase">RESILIENCIA</div>
+                    </div>
+                </div>
+            </AtlasCard>
+        </div>
+
+        {/* --- SECCIÓN 3: MISIONES DEL DÍA --- */}
+        <section>
+            <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <AtlasIcons.Target className="text-cyan-500" />
+                    PROTOCOLOS ACTIVOS
+                </h3>
+                <span className="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-cyan-400 border border-slate-700">
+                    HOY: {new Date().toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' })}
+                </span>
+            </div>
+
+            <div className="space-y-3">
+                {todaysTasks.length === 0 && (
+                    <div className="text-center py-10 text-slate-500 border border-dashed border-slate-700 rounded-xl bg-slate-800/30">
+                        <p>No hay misiones asignadas para hoy.</p>
+                        <p className="text-xs mt-1">Recarga tu energía para mañana.</p>
+                    </div>
+                )}
+
+                {todaysTasks.map((task) => {
+                    // Verificación de fecha
+                    let isCompletedToday = false;
+                    if (task.lastCompletedAt) {
+                        // Maneja tanto Timestamp de Firestore como Date de JS (si acabamos de actualizar localmente)
+                        const lastDate = task.lastCompletedAt.toDate ? task.lastCompletedAt.toDate() : task.lastCompletedAt;
+                        isCompletedToday = isSameDay(lastDate, new Date());
+                    }
+
+                    const title = task.staticTaskData?.title || task.title || "Misión Desconocida";
+                    const xpVal = task.staticTaskData?.xp || 10;
+                    const type = task.type === 'routine' ? 'Rutina' : 'Reto';
+
+                    return (
+                        <div 
+                            key={task.id} 
+                            onClick={() => !isCompletedToday && setSelectedTask(task)}
+                            className={`
+                                relative overflow-hidden group transition-all duration-300
+                                border rounded-xl p-4 flex items-center gap-4
+                                ${isCompletedToday 
+                                    ? 'bg-slate-900/40 border-slate-800 opacity-60 grayscale cursor-default' 
+                                    : 'bg-slate-800 border-slate-600 cursor-pointer hover:border-cyan-500 hover:shadow-[0_0_15px_rgba(6,182,212,0.1)] hover:-translate-y-1'
+                                }
+                            `}
+                        >
+                            <div className={`
+                                w-10 h-10 rounded-full flex items-center justify-center border transition-colors
+                                ${isCompletedToday 
+                                    ? 'bg-green-900/20 border-green-600 text-green-500' 
+                                    : 'bg-slate-900 border-slate-700 text-cyan-500 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-400'
+                                }
+                            `}>
+                                {isCompletedToday ? <AtlasIcons.Check size={20} /> : <AtlasIcons.Zap size={20} />}
+                            </div>
+
+                            <div className="flex-1">
+                                <h4 className={`font-bold transition-colors ${isCompletedToday ? 'text-slate-500 line-through' : 'text-slate-200 group-hover:text-white'}`}>
+                                    {title}
+                                </h4>
+                                <span className="text-xs text-slate-500 font-mono uppercase">{type}</span>
+                            </div>
+
+                            <div className={`text-xs font-bold font-mono px-2 py-1 rounded border ${
+                                isCompletedToday 
+                                ? 'text-slate-600 border-transparent' 
+                                : 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20'
+                            }`}>
+                                +{xpVal} XP
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </section>
+
+        {/* --- SECCIÓN 4: ALIADOS --- */}
+        <section>
+            <h3 className="text-sm text-slate-400 font-mono uppercase mb-3 mt-8 tracking-widest border-b border-slate-800 pb-2">
+                Red de Soporte
+            </h3>
+            {professionals.length === 0 ? (
+                <p className="text-sm text-slate-600 italic">No tienes especialistas vinculados.</p>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {professionals.map(pro => (
+                        <AtlasCard key={pro.id} className="flex items-center gap-4 border-slate-700 bg-slate-800/50">
+                            <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-xl">
+                                👨‍⚕️
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                                <h4 className="font-bold text-white text-sm truncate">{pro.fullName || pro.displayName || 'Especialista'}</h4>
+                                <p className="text-xs text-slate-500 truncate">Psicología / Salud</p>
+                            </div>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleUnlinkProfessional(pro.id); }}
+                                className="text-red-400 hover:text-white hover:bg-red-600 text-[10px] uppercase border border-red-900/50 bg-red-900/10 px-2 py-1 rounded transition-all"
+                            >
+                                Desvincular
+                            </button>
+                        </AtlasCard>
+                    ))}
+                </div>
+            )}
+        </section>
+        
+        {/* --- SECCIÓN 5: CHECK EMOCIONAL RÁPIDO --- */}
+        <AtlasCard className="mt-8 border-cyan-900/30 bg-gradient-to-b from-slate-800 to-slate-900">
+            <h3 className="text-sm text-slate-400 font-mono uppercase mb-4 text-center tracking-widest">
+                Check-in Emocional
+            </h3>
+            <div className="flex justify-between px-4 sm:px-10">
+                {['😫', '😕', '😐', '🙂', '🤩'].map((emoji, i) => (
+                    <button 
+                        key={i} 
+                        className="text-2xl md:text-3xl hover:scale-125 transition-transform p-2 grayscale hover:grayscale-0 cursor-pointer"
+                        onClick={() => alert("Registro emocional guardado (Simulación)")}
+                    >
+                        {emoji}
+                    </button>
+                ))}
+            </div>
+        </AtlasCard>
+
+      </main>
+
+      {/* --- MODAL DE VALIDACIÓN --- */}
+      {selectedTask && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="w-full max-w-md bg-slate-900 border border-cyan-500/50 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.2)] overflow-hidden">
+                
+                {/* Header Modal */}
+                <div className="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center">
+                    <h3 className="font-bold text-white flex items-center gap-2">
+                        <AtlasIcons.Zap className="text-cyan-400" />
+                        VALIDAR PROTOCOLO
+                    </h3>
+                    <button onClick={() => setSelectedTask(null)} className="text-slate-400 hover:text-white">
+                        <AtlasIcons.Close />
+                    </button>
+                </div>
+
+                <div className="p-6 space-y-6">
+                    <div>
+                        <h4 className="text-xl font-bold text-white mb-1">
+                            {selectedTask.staticTaskData?.title || selectedTask.title}
+                        </h4>
+                        <p className="text-sm text-slate-400">
+                            {selectedTask.description || "Completa este ejercicio y registra tu experiencia para ganar XP."}
+                        </p>
+                    </div>
+
+                    {/* Reflexión */}
+                    <div>
+                        <label className="text-xs font-mono text-cyan-400 uppercase mb-2 block">Bitácora (Opcional)</label>
+                        <textarea 
+                            value={reflection}
+                            onChange={(e) => setReflection(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-slate-200 text-sm focus:border-cyan-500 focus:outline-none h-24 resize-none"
+                            placeholder="¿Cómo te sentiste?..."
+                        />
+                    </div>
+
+                    {/* Rating */}
+                    <div>
+                        <label className="text-xs font-mono text-cyan-400 uppercase mb-2 block">Autoevaluación (1-5)</label>
+                        <div className="flex justify-between bg-slate-950 p-2 rounded-lg border border-slate-700">
+                            {[1, 2, 3, 4, 5].map(num => (
+                                <button
+                                    key={num}
+                                    onClick={() => setRating(num)}
+                                    className={`w-10 h-10 rounded-md font-bold transition-all ${
+                                        rating === num ? 'bg-cyan-600 text-white shadow-lg scale-110' : 'text-slate-500 hover:text-white'
+                                    }`}
+                                >
+                                    {num}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <AtlasButton 
+                        onClick={handleCompleteTask} 
+                        isLoading={submittingTask} 
+                        className="w-full"
+                    >
+                        COMPLETAR Y RECLAMAR XP
+                    </AtlasButton>
+                </div>
+            </div>
+        </div>
+      )}
 
     </div>
   );
