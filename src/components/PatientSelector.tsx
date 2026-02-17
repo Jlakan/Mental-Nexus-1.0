@@ -59,14 +59,14 @@ export default function PatientSelector({ patients, selectedPatientId, manualNam
 
   return (
     <div ref={wrapperRef} style={{ position: 'relative', width: '100%' }}>
-      <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Paciente:</label>
+      <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px', color: '#000' }}>Paciente:</label>
       <input
         type="text"
         placeholder="Buscar o escribir nombre nuevo..."
         value={searchTerm}
         onChange={handleInputChange}
         onFocus={() => setIsOpen(true)}
-        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc', boxSizing:'border-box' }}
+        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc', boxSizing:'border-box', color: '#000' }}
         autoComplete="off" 
       />
 

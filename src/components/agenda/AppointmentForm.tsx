@@ -69,7 +69,7 @@ const AppointmentForm: React.FC<AppointmentFormProps> = ({
 
           <div style={{display:'flex', gap:'10px', marginTop:'15px'}}>
             <div style={{flex:1}}>
-              <label style={{fontSize:'12px', color:'#666'}}>Precio Consulta</label>
+              <label style={{fontSize:'12px', color:'#000'}}>Precio Consulta</label>
               <input
                 type="number"
                 value={formData.price}
@@ -78,7 +78,7 @@ const AppointmentForm: React.FC<AppointmentFormProps> = ({
               />
             </div>
             <div style={{flex:1}}>
-              <label style={{fontSize:'12px', color:'#666'}}>Método Pago</label>
+              <label style={{fontSize:'12px', color:'#000'}}>Método Pago</label>
               <select
                 value={formData.paymentMethod}
                 onChange={(e) => setFormData({...formData, paymentMethod: e.target.value})}
@@ -100,7 +100,7 @@ const AppointmentForm: React.FC<AppointmentFormProps> = ({
               onChange={(e) => setSavePricePreference(e.target.checked)}
               style={{marginRight:'8px', cursor:'pointer'}}
             />
-            <label htmlFor="savePriceCheck" style={{fontSize:'12px', cursor:'pointer', userSelect:'none'}}>
+            <label htmlFor="savePriceCheck" style={{fontSize:'12px', cursor:'pointer', userSelect:'none', color:'#000'}}>
               Fijar <b>${formData.price}</b> como precio para futuras citas de este paciente.
             </label>
           </div>
@@ -109,11 +109,11 @@ const AppointmentForm: React.FC<AppointmentFormProps> = ({
             placeholder="Notas internas..." 
             value={formData.adminNotes} 
             onChange={e => setFormData({...formData, adminNotes: e.target.value})} 
-            style={{width:'100%', marginTop:'15px', padding:'8px', minHeight:'60px'}} 
+            style={{width:'100%', marginTop:'15px', padding:'8px', minHeight:'60px', color: '#000'}} 
           />
 
           <div style={{marginTop:'20px', textAlign:'right'}}>
-            <button type="button" onClick={onClose} style={{marginRight:'10px', padding:'8px 15px', border:'none', background:'#eee', borderRadius:'4px', cursor:'pointer'}}>Cancelar</button>
+            <button type="button" onClick={onClose} style={{marginRight:'10px', padding:'8px 15px', border:'none', background:'#eee', borderRadius:'4px', cursor:'pointer', color:'#000'}}>Cancelar</button>
             <button type="submit" style={{padding:'8px 15px', background:'#2196F3', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>Guardar</button>
           </div>
         </form>
