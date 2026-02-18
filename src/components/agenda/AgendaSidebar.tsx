@@ -29,6 +29,9 @@ interface AgendaSidebarProps {
 
   // Prop para responsive
   isMobile: boolean; 
+  
+  // Función auditora
+  onSyncPatients: () => void;
 }
 
 const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
@@ -36,7 +39,8 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
   activeSidePanel, setActiveSidePanel, isPausedSidebarOpen, setIsPausedSidebarOpen,
   patientsNeedingAppt, waitlist, pausedList,
   onOpenPausedSidebar, onScheduleNeeding, onArchivePatient, onAddWaitlist, onDeleteWaitlist, onReactivatePatient,
-  isMobile
+  isMobile,
+  onSyncPatients
 }) => {
 
   // --- LÓGICA (Conservamos la mejora de V2) ---
@@ -98,6 +102,11 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
 
         <button onClick={onOpenConfig} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'white', border:'1px solid #ccc', borderRadius:'6px', cursor:'pointer', textAlign:'left'}}>⚙️ Configurar</button>
         <button onClick={onOpenEvents} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'#F3E5F5', border:'1px solid #E1BEE7', color:'#7B1FA2', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', textAlign:'left'}}>📅 Mis Eventos</button>
+
+        {/* --- BOTÓN DE SINCRONIZACIÓN NUEVO --- */}
+        <button onClick={onSyncPatients} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'#E8F5E9', border:'1px solid #C8E6C9', color:'#2E7D32', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', textAlign:'left'}}>
+          🔄 Auditar Pacientes
+        </button>
 
         {isMonthInitialized ? (
           <button onClick={onRegenerate} style={{width:'100%', marginBottom:'20px', padding:'10px', background:'#FFF3E0', border:'1px solid #FFB74D', color:'#E65100', borderRadius:'6px', cursor:'pointer', textAlign:'left'}}>🔄 Actualizar Espacios</button>

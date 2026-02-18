@@ -570,6 +570,93 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
       setCurrentMonthData(emptySlots); setMonthGoal(''); setIsMonthInitialized(true);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
+
+  // --- FUNCIÓN AUDITORA: SINCRONIZAR PACIENTES VS AGENDA ---
+  const handleSyncPatients = async () => {
+    if (!window.confirm("¿Sincronizar expedientes?\n\nEsto escaneará la agenda actual para detectar citas y sacará a los pacientes correctos de la lista 'Sin Cita'.")) return;
+    setLoading(true);
+    try {
+      const now = new Date();
+      const year = selectedDate.getFullYear();
+      const month = selectedDate.getMonth();
+      
+      // Escaneamos el mes actual y el mes siguiente para no perder citas cercanas
+      const monthsToCheck = [
+        `${year}_${month.toString().padStart(2, '0')}`,
+        `${month === 11 ? year + 1 : year}_${((month + 1) % 12).toString().padStart(2, '0')}`
+      ];
+
+      const futureAppointments = new Map<string, Date>(); 
+
+      // 1. Leer la agenda y recolectar citas reales
+      for (const mId of monthsToCheck) {
+        const docSnap = await getDoc(doc(db, "professionals", selectedProfId, "availability", mId));
+        if (docSnap.exists()) {
+          const slots = docSnap.data().slots || {};
+          Object.entries(slots).forEach(([key, slot]: [string, any]) => {
+            if (slot.status === 'booked' && slot.patientId) {
+              const [yStr, mStr] = mId.split('_');
+              const slotDate = getDateFromSlotKey(key, parseInt(yStr), parseInt(mStr));
+              if (slotDate >= now) {
+                const existingDate = futureAppointments.get(slot.patientId);
+                // Si es la cita más próxima, la guardamos
+                if (!existingDate || slotDate < existingDate) {
+                  futureAppointments.set(slot.patientId, slotDate);
+                }
+              }
+            }
+          });
+        }
+      }
+
+      // 2. Comparar y corregir a los pacientes
+      const batch = writeBatch(db);
+      let updatesCount = 0;
+
+      patients.forEach(p => {
+        const teamData = p.careTeam?.[selectedProfId];
+        if (!teamData) return;
+
+        const correctNextAppt = futureAppointments.get(p.id);
+        const currentNextAppt = teamData.nextAppointment ? new Date(teamData.nextAppointment) : null;
+
+        // Caso A: Tiene cita en la agenda, pero su expediente no lo sabe
+        if (correctNextAppt) {
+          if (!currentNextAppt || currentNextAppt.getTime() !== correctNextAppt.getTime()) {
+            batch.update(doc(db, "patients", p.id), {
+              [`careTeam.${selectedProfId}.nextAppointment`]: correctNextAppt.toISOString(),
+              [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString()
+            });
+            updatesCount++;
+          }
+        } 
+        // Caso B: Su expediente dice que tiene cita, pero no existe en la agenda
+        else if (currentNextAppt && currentNextAppt > now) {
+           batch.update(doc(db, "patients", p.id), {
+              [`careTeam.${selectedProfId}.nextAppointment`]: null,
+              [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString()
+            });
+            updatesCount++;
+        }
+      });
+
+      // 3. Aplicar los cambios
+      if (updatesCount > 0) {
+        await batch.commit();
+        await loadPatients(); // Recargamos para limpiar la lista visual
+        alert(`✅ Auditoría completa. Se corrigió el estado de ${updatesCount} paciente(s).`);
+      } else {
+        alert("✅ Todo está en orden. No se encontraron desincronizaciones.");
+      }
+
+    } catch (error) {
+      console.error(error);
+      alert("Error al sincronizar datos.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRegenerateMonth = async () => {
     if (!currentMonthData) return;
     if (!window.confirm("⚠️ ¿Actualizar horarios conservando citas existentes?")) return;
@@ -834,7 +921,11 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
                   </div>
                 ) : (
                   <div onClick={() => openForm(key, slot)} style={{background: slot.paymentStatus==='paid'?'#E8F5E9':'#E3F2FD', borderLeft:`4px solid ${slot.paymentStatus==='paid'?'#4CAF50':'#2196F3'}`, padding:'10px', borderRadius:'6px', position:'relative', cursor:'pointer'}}>
-                    <div style={{fontWeight:'bold', paddingRight:'65px', color: '#333' }}>{slot.patientName}</div> <div style={{fontSize:'12px', color:'#666'}}>{slot.adminNotes || 'Sin notas'}</div> <div style={{fontSize:'10px', fontWeight:'bold', marginTop:'3px', color:'#1565C0'}}>${slot.price}</div>
+                    {/* AQUÍ ESTÁ EL ARREGLO DE COLOR (color: '#222' y color: '#555') */}
+                    <div style={{fontWeight:'bold', paddingRight:'65px', color: '#222'}}>{slot.patientName}</div> 
+                    <div style={{fontSize:'12px', color:'#555', marginTop: '2px'}}>{slot.adminNotes || 'Sin notas'}</div> 
+                    <div style={{fontSize:'11px', fontWeight:'bold', marginTop:'4px', color:'#1565C0'}}>${slot.price}</div>
+                    
                     <div onClick={(e) => { e.stopPropagation(); handleQuickPay(key, slot.paymentStatus); }} style={{ position:'absolute', right:'40px', top:'10px', width:'24px', height:'24px', borderRadius:'50%', background: slot.paymentStatus === 'paid' ? '#4CAF50' : '#E0E0E0', color: slot.paymentStatus === 'paid' ? 'white' : '#757575', display:'flex', justifyContent:'center', alignItems:'center', fontWeight:'bold', fontSize:'12px', border: '1px solid #ccc', zIndex:5 }}> $ </div>
                     <button onClick={(e) => { e.stopPropagation(); handleMarkNoShow(key, slot.patientId); }} style={{ position:'absolute', right:'70px', top:'10px', width:'24px', height:'24px', borderRadius:'50%', background:'#FFEBEE', color:'#D32F2F', border:'1px solid #FFCDD2', display:'flex', justifyContent:'center', alignItems:'center', cursor:'pointer', fontSize:'12px', zIndex:5 }}> 🚫 </button>
                     <button onClick={(e)=>{e.stopPropagation(); handleSmartReleaseCheck(key)}} style={{position:'absolute', right:'10px', top:'10px', border:'none', background:'none', color:'#D32F2F', cursor:'pointer', fontSize:'16px'}}>🗑</button>
@@ -886,6 +977,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
           onDeleteWaitlist={handleDeleteWaitlistItem}
           onReactivatePatient={handleReactivatePatient}
           isMobile={isMobile}
+          onSyncPatients={handleSyncPatients}
         />
         {isMobile && showMobileSidebar && (
            <button 
