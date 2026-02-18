@@ -767,6 +767,21 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     if (isMobile) setShowMobileSidebar(false);
   };
 
+  // NUEVA FUNCIÓN AÑADIDA PARA CANCELAR LA SELECCIÓN
+  const handleCancelSelection = () => {
+    setFormData({
+      patientId: '',
+      patientName: '',
+      patientExternalPhone: '',
+      patientExternalEmail: '',
+      price: workConfig.defaultPrice,
+      adminNotes: '',
+      paymentStatus: 'pending',
+      paymentMethod: 'cash'
+    });
+    setSelectedPatientNoShows(0);
+  };
+
   const DateSelectorRow = ({ label, dateValue, onChange }: { label: string, dateValue: dayjs.Dayjs, onChange: (d: dayjs.Dayjs) => void }) => {
     const daysInMonth = dateValue.daysInMonth();
     const days = Array.from({length: daysInMonth}, (_, i) => i + 1);
@@ -945,6 +960,46 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
             })}
           </div>
         </div>
+
+        {/* --- BANNER FLOTANTE DE PACIENTE SELECCIONADO (OPCIÓN C) --- */}
+        {!isFormOpen && formData.patientId && formData.patientName && (
+          <div style={{
+            position: 'absolute',
+            bottom: '30px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#323232',
+            color: 'white',
+            padding: '12px 24px',
+            borderRadius: '30px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '15px',
+            boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+            zIndex: 90
+          }}>
+            <span style={{ fontSize: isMobile ? '12px' : '14px' }}>
+              Agendando a: <b>{formData.patientName}</b>. Haz clic en un espacio libre.
+            </span>
+            <button
+              onClick={handleCancelSelection}
+              style={{
+                background: '#FF5252',
+                color: 'white',
+                border: 'none',
+                borderRadius: '20px',
+                padding: '6px 12px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '12px',
+                transition: 'background 0.2s'
+              }}
+            >
+              Cancelar ✕
+            </button>
+          </div>
+        )}
+
       </div>
 
       {/* --- MODALES INLINE --- */}
