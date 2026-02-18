@@ -225,12 +225,16 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   }, [currentUserId, userRole, doctorId]);
 
   useEffect(() => {
-    if (!selectedProfId) return;
+    // 1. Agregamos un candado: No buscar pacientes hasta tener la info del doctor
+    if (!selectedProfId || myProfessionals.length === 0) return; 
+
     loadMonthDoc();
     loadPatients();
     loadWaitlist();
     loadAnnualEvents();
-  }, [selectedProfId, selectedDate.getMonth(), selectedDate.getFullYear()]);
+    
+  // 2. Agregamos myProfessionals al arreglo de dependencias
+  }, [selectedProfId, selectedDate.getMonth(), selectedDate.getFullYear(), myProfessionals]);
 
   useEffect(() => {
     if (patients.length > 0 && selectedProfId) {
@@ -311,15 +315,25 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
 
   const loadPatients = async () => {
     const profRef = myProfessionals.find(p => p.id === selectedProfId);
-    if(profRef?.professionalCode) {
+    if (!profRef) return; // Evita errores si aún no carga
+
+    let allPats: any[] = [];
+
+    // 1. Buscar los vinculados por código (Solo si el doctor tiene un código generado)
+    if(profRef.professionalCode) {
       const qLinked = query(collection(db, "patients"), where("linkedProfessionalCode", "==", profRef.professionalCode));
       const snapLinked = await getDocs(qLinked);
-      const qManual = query(collection(db, "patients"), where("linkedProfessionalId", "==", selectedProfId), where("isManual", "==", true));
-      const snapManual = await getDocs(qManual);
-      const allPats = [...snapLinked.docs.map(d => ({id: d.id, ...d.data()})), ...snapManual.docs.map(d => ({id: d.id, ...d.data()}))];
-      const uniquePats = Array.from(new Map(allPats.map(item => [item.id, item])).values());
-      setPatients(uniquePats);
+      allPats = [...allPats, ...snapLinked.docs.map(d => ({id: d.id, ...d.data()}))];
     }
+
+    // 2. Buscar los manuales SIEMPRE (incluso si no hay código)
+    const qManual = query(collection(db, "patients"), where("linkedProfessionalId", "==", selectedProfId), where("isManual", "==", true));
+    const snapManual = await getDocs(qManual);
+    allPats = [...allPats, ...snapManual.docs.map(d => ({id: d.id, ...d.data()}))];
+
+    // 3. Filtrar duplicados y guardar en el estado
+    const uniquePats = Array.from(new Map(allPats.map(item => [item.id, item])).values());
+    setPatients(uniquePats);
   };
 
   const loadWaitlist = async () => {
