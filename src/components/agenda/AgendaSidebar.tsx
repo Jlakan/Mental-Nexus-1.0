@@ -176,7 +176,7 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
              {activeSidePanel === 'needing' ? (
                 patientsNeedingAppt.map(p => (
                   <div key={p.id} onClick={() => onScheduleNeeding(p)} style={{background:'white', border:'1px solid #eee', marginBottom:'8px', padding:'12px', borderRadius:'8px', cursor:'pointer'}}>
-                    <strong style={{fontSize:'14px'}}>{p.fullName}</strong>
+                    <strong style={{fontSize:'14px', color: '#222'}}>{p.fullName}</strong>
                     <div style={{marginTop:'10px', textAlign:'right'}}>
                       <button onClick={(e) => { e.stopPropagation(); onArchivePatient(p.id, p.fullName); }} style={{fontSize:'11px', padding:'4px 8px', cursor:'pointer'}}>Pausar</button>
                     </div>
