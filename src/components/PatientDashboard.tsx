@@ -10,7 +10,6 @@ import {
   getDocs, 
   updateDoc, 
  
-  arrayRemove, // <--- CRÍTICO: Necesario para desvincular (ya no lo usaremos para el profesional, pero lo dejo por si lo necesitas)
   increment, 
   serverTimestamp,
   Timestamp 
