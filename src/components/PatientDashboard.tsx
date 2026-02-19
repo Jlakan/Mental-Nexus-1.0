@@ -10,7 +10,7 @@ import {
   getDocs, 
   updateDoc, 
  
-  arrayRemove, // <--- CRÍTICO: Necesario para desvincular
+  arrayRemove, // <--- CRÍTICO: Necesario para desvincular (ya no lo usaremos para el profesional, pero lo dejo por si lo necesitas)
   increment, 
   serverTimestamp,
   Timestamp 
@@ -37,7 +37,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
   const [loading, setLoading] = useState(true);
   const [patientData, setPatientData] = useState<any>(null);
   const [tasks, setTasks] = useState<any[]>([]);
-  const [professionals, setProfessionals] = useState<any[]>([]);
+  // ---> CORRECCIÓN: Eliminamos el estado professionals porque usaremos patientData.careTeam
   
   // Modal State
   const [selectedTask, setSelectedTask] = useState<any>(null);
@@ -71,12 +71,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         setTasks(loadedTasks);
 
         // C) Profesionales Vinculados
-        // Asumiendo que 'professionals' es una colección raíz y tienen un array 'patients'
-        const profsQuery = query(collection(db, 'users'), where('role', '==', 'professional'), where('patients', 'array-contains', user.uid));
-        // NOTA: Si usabas una estructura diferente en V1 para profesionales, ajusta esta query.
-        // Por ahora intentamos buscar en la colección de usuarios general filtrando por rol.
-        const profsSnap = await getDocs(profsQuery);
-        setProfessionals(profsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        // ---> CORRECCIÓN: Eliminamos la consulta a la base de datos porque los especialistas ya vienen en userSnap.data().careTeam
 
       } catch (error) {
         console.error("Error cargando dashboard:", error);
@@ -200,22 +195,21 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
   const handleUnlinkProfessional = async (profId: string) => {
       if(!window.confirm("¿Seguro que deseas cortar el enlace con este especialista?")) return;
       try {
-          // Asumiendo que el ID del documento del profesional es profId
-          const profRef = doc(db, 'users', profId); 
+          // ---> CORRECCIÓN: Actualizar el mapa careTeam en el documento del paciente
+          const userRef = doc(db, 'patients', user.uid);
           
-          await updateDoc(profRef, {
-              patients: arrayRemove(user.uid) // <--- CORREGIDO: arrayRemove
-          });
-          
-          // Eliminar permiso en el documento del usuario (si V1 lo usaba)
-          // ---> NOTA: Aquí lo dejé como 'users' por si en V1 aún lo necesitas, pero si ya es 'patients' cámbialo a doc(db, 'patients', user.uid)
-          const userRef = doc(db, 'users', user.uid);
+          // Cambiamos el status a inactive dentro del mapa careTeam
           await updateDoc(userRef, {
-            [`permissions.${profId}`]: serverTimestamp() // O deleteField() si usas 'deleteField' importado
+            [`careTeam.${profId}.active`]: false
           });
 
-          // Actualizar UI
-          setProfessionals(prev => prev.filter(p => p.id !== profId));
+          // Actualizamos la UI localmente para que desaparezca al instante
+          setPatientData((prev: any) => {
+              const newCareTeam = { ...prev.careTeam };
+              if(newCareTeam[profId]) newCareTeam[profId].active = false;
+              return { ...prev, careTeam: newCareTeam };
+          });
+          
           alert("Enlace neural cortado correctamente.");
       } catch (e) {
           console.error(e);
@@ -402,21 +396,28 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
             <h3 className="text-sm text-slate-400 font-mono uppercase mb-3 mt-8 tracking-widest border-b border-slate-800 pb-2">
                 Red de Soporte
             </h3>
-            {professionals.length === 0 ? (
+            {/* ---> CORRECCIÓN: Renderizar directamente desde patientData.careTeam y filtrar los activos */}
+            {(!patientData?.careTeam || Object.values(patientData.careTeam).filter((pro: any) => pro.active).length === 0) ? (
                 <p className="text-sm text-slate-600 italic">No tienes especialistas vinculados.</p>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {professionals.map(pro => (
-                        <AtlasCard key={pro.id} className="flex items-center gap-4 border-slate-700 bg-slate-800/50">
+                    {Object.values(patientData.careTeam)
+                        .filter((pro: any) => pro.active)
+                        .map((pro: any) => (
+                        <AtlasCard key={pro.professionalId} className="flex items-center gap-4 border-slate-700 bg-slate-800/50">
                             <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-xl">
                                 👨‍⚕️
                             </div>
                             <div className="flex-1 overflow-hidden">
-                                <h4 className="font-bold text-white text-sm truncate">{pro.fullName || pro.displayName || 'Especialista'}</h4>
-                                <p className="text-xs text-slate-500 truncate">Psicología / Salud</p>
+                                <h4 className="font-bold text-white text-sm truncate">
+                                    {pro.professionalName || 'Especialista'}
+                                </h4>
+                                <p className="text-xs text-slate-500 capitalize truncate">
+                                    {pro.professionType || 'Salud Mental'}
+                                </p>
                             </div>
                             <button 
-                                onClick={(e) => { e.stopPropagation(); handleUnlinkProfessional(pro.id); }}
+                                onClick={(e) => { e.stopPropagation(); handleUnlinkProfessional(pro.professionalId); }}
                                 className="text-red-400 hover:text-white hover:bg-red-600 text-[10px] uppercase border border-red-900/50 bg-red-900/10 px-2 py-1 rounded transition-all"
                             >
                                 Desvincular
