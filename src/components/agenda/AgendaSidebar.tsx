@@ -187,7 +187,7 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
                   <button onClick={onAddWaitlist} style={{width:'100%', marginBottom:'10px', padding:'8px', background:'#1976D2', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>+ Agregar a Espera</button>
                   {waitlist.map(w => (
                     <div key={w.id} style={{background:'white', border:'1px solid #eee', borderLeft:'4px solid #FFA000', padding:'10px', marginBottom:'8px'}}>
-                      <div style={{fontWeight:'bold'}}>{w.patientName}</div>
+                      <div style={{fontWeight:'bold', color: '#222'}}>{w.patientName}</div>
                       <button onClick={() => onDeleteWaitlist(w.id)} style={{color:'red', border:'none', background:'none', cursor:'pointer', fontSize:'11px'}}>Eliminar</button>
                     </div>
                   ))}
@@ -206,7 +206,7 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
           <div style={{flex:1, overflowY:'auto', padding:'10px'}}>
             {pausedList.map(p => (
               <div key={p.id} style={{background:'white', border:'1px solid #eee', borderLeft:'4px solid #BDBDBD', padding:'12px', marginBottom:'8px'}}>
-                <div style={{fontWeight:'bold'}}>{p.fullName}</div>
+                <div style={{fontWeight:'bold', color: '#222'}}>{p.fullName}</div>
                 <button onClick={() => onReactivatePatient(p.id, p.fullName)} style={{width:'100%', marginTop:'10px', padding:'8px', background:'#4CAF50', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>🔄 Reactivar</button>
               </div>
             ))}

@@ -55,16 +55,18 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
       try {
         // A) Perfil del Usuario
-        const userRef = doc(db, 'users', user.uid);
+        // ---> CORRECCIÓN: Apuntar a la colección 'patients' en lugar de 'users'
+        const userRef = doc(db, 'patients', user.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
           setPatientData(userSnap.data());
         }
 
         // B) Tareas (Assignments)
-        // Buscamos en la subcolección del usuario (Patrón V1) para máxima compatibilidad
-        const tasksRef = collection(db, 'users', user.uid, 'assignments');
-        const tasksSnap = await getDocs(tasksRef);
+        // ---> CORRECCIÓN: Apuntar a la colección raíz 'assigned_routines' y filtrar por patientId
+        const tasksRef = collection(db, 'assigned_routines');
+        const q = query(tasksRef, where('patientId', '==', user.uid));
+        const tasksSnap = await getDocs(q);
         const loadedTasks = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         setTasks(loadedTasks);
 
@@ -106,8 +108,9 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
   // B. Filtrado de Tareas (Lógica Híbrida V1/V2)
   const getTodaysTasks = () => {
     const today = new Date();
-    const daysV1 = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const dayKey = daysV1[today.getDay()]; 
+    // ---> CORRECCIÓN: Cambiar al formato de días en español de tu base de datos
+    const daysSpanish = ['dom', 'lun', 'mar', 'mie', 'jue', 'vie', 'sab'];
+    const dayKey = daysSpanish[today.getDay()]; 
 
     return tasks.filter((task: any) => {
       // 1. Verificar si está activa (opcional, si tienes campo isActive)
@@ -118,7 +121,8 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         if (Array.isArray(task.frequency)) {
             return task.frequency.includes(dayKey); // Nuevo formato
         } else if (typeof task.frequency === 'object') {
-            return task.frequency[dayKey] === true; // Viejo formato V1
+            // ---> CORRECCIÓN: Verificar si el valor es 1 (tu formato) o true (formato anterior)
+            return task.frequency[dayKey] === 1 || task.frequency[dayKey] === true; 
         }
       }
       return true; // Si no hay frecuencia, se asume diario
@@ -133,10 +137,14 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
     setSubmittingTask(true);
 
     try {
-      const taskRef = doc(db, 'users', user.uid, 'assignments', selectedTask.id);
-      const userRef = doc(db, 'users', user.uid);
+      // ---> CORRECCIÓN: Apuntar a 'assigned_routines' y 'patients'
+      const taskRef = doc(db, 'assigned_routines', selectedTask.id);
+      const userRef = doc(db, 'patients', user.uid);
       
-      const xpReward = (selectedTask.staticTaskData?.xp || 10);
+      // ---> CORRECCIÓN: Obtener XP y Oro desde el mapa 'rewards' que tienes en tu BD
+      const xpReward = (selectedTask.rewards?.xp || selectedTask.staticTaskData?.xp || 10);
+      const goldReward = (selectedTask.rewards?.gold || 5);
+      
       const dateStr = new Date().toISOString().split('T')[0];
 
       // 1. Actualizar Tarea
@@ -151,9 +159,10 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
       });
 
       // 2. Actualizar Usuario (XP, Oro, Stats)
+      // ---> CORRECCIÓN: Usar la variable goldReward dinámica
       await updateDoc(userRef, {
         'gamification.xp': increment(xpReward),
-        'gamification.gold': increment(5),
+        'gamification.gold': increment(goldReward),
         'gamification.completedMissions': increment(1)
         // Aquí podrías agregar lógica para subir stats específicos según el tipo de tarea
       });
@@ -199,6 +208,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
           });
           
           // Eliminar permiso en el documento del usuario (si V1 lo usaba)
+          // ---> NOTA: Aquí lo dejé como 'users' por si en V1 aún lo necesitas, pero si ya es 'patients' cámbialo a doc(db, 'patients', user.uid)
           const userRef = doc(db, 'users', user.uid);
           await updateDoc(userRef, {
             [`permissions.${profId}`]: serverTimestamp() // O deleteField() si usas 'deleteField' importado
@@ -340,7 +350,8 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
                     }
 
                     const title = task.staticTaskData?.title || task.title || "Misión Desconocida";
-                    const xpVal = task.staticTaskData?.xp || 10;
+                    // ---> CORRECCIÓN: Mostrar la recompensa correcta en la UI
+                    const xpVal = task.rewards?.xp || task.staticTaskData?.xp || 10;
                     const type = task.type === 'routine' ? 'Rutina' : 'Reto';
 
                     return (

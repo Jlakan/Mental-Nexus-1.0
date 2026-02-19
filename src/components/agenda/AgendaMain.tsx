@@ -224,17 +224,19 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     loadContext();
   }, [currentUserId, userRole, doctorId]);
 
+  // 1. Cargar datos de la agenda (mes, espera, eventos) - SEPARADO
   useEffect(() => {
-    // 1. Agregamos un candado: No buscar pacientes hasta tener la info del doctor
-    if (!selectedProfId || myProfessionals.length === 0) return; 
-
+    if (!selectedProfId) return;
     loadMonthDoc();
-    loadPatients();
     loadWaitlist();
     loadAnnualEvents();
-    
-  // 2. Agregamos myProfessionals al arreglo de dependencias
-  }, [selectedProfId, selectedDate.getMonth(), selectedDate.getFullYear(), myProfessionals]);
+  }, [selectedProfId, selectedDate.getMonth(), selectedDate.getFullYear()]);
+
+  // 2. Cargar pacientes - SEPARADO para arreglar el bug de los Asistentes
+  useEffect(() => {
+    if (!selectedProfId || myProfessionals.length === 0) return;
+    loadPatients();
+  }, [selectedProfId, myProfessionals]);
 
   useEffect(() => {
     if (patients.length > 0 && selectedProfId) {
@@ -315,25 +317,15 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
 
   const loadPatients = async () => {
     const profRef = myProfessionals.find(p => p.id === selectedProfId);
-    if (!profRef) return; // Evita errores si aún no carga
-
-    let allPats: any[] = [];
-
-    // 1. Buscar los vinculados por código (Solo si el doctor tiene un código generado)
-    if(profRef.professionalCode) {
+    if(profRef?.professionalCode) {
       const qLinked = query(collection(db, "patients"), where("linkedProfessionalCode", "==", profRef.professionalCode));
       const snapLinked = await getDocs(qLinked);
-      allPats = [...allPats, ...snapLinked.docs.map(d => ({id: d.id, ...d.data()}))];
+      const qManual = query(collection(db, "patients"), where("linkedProfessionalId", "==", selectedProfId), where("isManual", "==", true));
+      const snapManual = await getDocs(qManual);
+      const allPats = [...snapLinked.docs.map(d => ({id: d.id, ...d.data()})), ...snapManual.docs.map(d => ({id: d.id, ...d.data()}))];
+      const uniquePats = Array.from(new Map(allPats.map(item => [item.id, item])).values());
+      setPatients(uniquePats);
     }
-
-    // 2. Buscar los manuales SIEMPRE (incluso si no hay código)
-    const qManual = query(collection(db, "patients"), where("linkedProfessionalId", "==", selectedProfId), where("isManual", "==", true));
-    const snapManual = await getDocs(qManual);
-    allPats = [...allPats, ...snapManual.docs.map(d => ({id: d.id, ...d.data()}))];
-
-    // 3. Filtrar duplicados y guardar en el estado
-    const uniquePats = Array.from(new Map(allPats.map(item => [item.id, item])).values());
-    setPatients(uniquePats);
   };
 
   const loadWaitlist = async () => {
@@ -594,7 +586,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
       const year = selectedDate.getFullYear();
       const month = selectedDate.getMonth();
       
-      // Escaneamos el mes actual y el mes siguiente para no perder citas cercanas
       const monthsToCheck = [
         `${year}_${month.toString().padStart(2, '0')}`,
         `${month === 11 ? year + 1 : year}_${((month + 1) % 12).toString().padStart(2, '0')}`
@@ -602,7 +593,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
 
       const futureAppointments = new Map<string, Date>(); 
 
-      // 1. Leer la agenda y recolectar citas reales
       for (const mId of monthsToCheck) {
         const docSnap = await getDoc(doc(db, "professionals", selectedProfId, "availability", mId));
         if (docSnap.exists()) {
@@ -613,7 +603,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
               const slotDate = getDateFromSlotKey(key, parseInt(yStr), parseInt(mStr));
               if (slotDate >= now) {
                 const existingDate = futureAppointments.get(slot.patientId);
-                // Si es la cita más próxima, la guardamos
                 if (!existingDate || slotDate < existingDate) {
                   futureAppointments.set(slot.patientId, slotDate);
                 }
@@ -623,7 +612,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         }
       }
 
-      // 2. Comparar y corregir a los pacientes
       const batch = writeBatch(db);
       let updatesCount = 0;
 
@@ -634,7 +622,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         const correctNextAppt = futureAppointments.get(p.id);
         const currentNextAppt = teamData.nextAppointment ? new Date(teamData.nextAppointment) : null;
 
-        // Caso A: Tiene cita en la agenda, pero su expediente no lo sabe
         if (correctNextAppt) {
           if (!currentNextAppt || currentNextAppt.getTime() !== correctNextAppt.getTime()) {
             batch.update(doc(db, "patients", p.id), {
@@ -644,7 +631,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
             updatesCount++;
           }
         } 
-        // Caso B: Su expediente dice que tiene cita, pero no existe en la agenda
         else if (currentNextAppt && currentNextAppt > now) {
            batch.update(doc(db, "patients", p.id), {
               [`careTeam.${selectedProfId}.nextAppointment`]: null,
@@ -654,10 +640,9 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         }
       });
 
-      // 3. Aplicar los cambios
       if (updatesCount > 0) {
         await batch.commit();
-        await loadPatients(); // Recargamos para limpiar la lista visual
+        await loadPatients(); 
         alert(`✅ Auditoría completa. Se corrigió el estado de ${updatesCount} paciente(s).`);
       } else {
         alert("✅ Todo está en orden. No se encontraron desincronizaciones.");
@@ -759,26 +744,37 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
 
   const handleMarkNoShow = async (slotKey: string, patientId: string | undefined) => {
     if (!window.confirm("¿Marcar NO SHOW?")) return;
+    
     setLoading(true);
     try {
       const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
       const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-      const batch = writeBatch(db);
       const slotPayload = { status: 'cancelled', adminNotes: '[AUSENCIA] El paciente no se presentó.', updatedAt: new Date().toISOString() };
+      
       const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
-      batch.update(agendaRef, { [`slots.${slotKey}.status`]: 'cancelled', [`slots.${slotKey}.adminNotes`]: slotPayload.adminNotes, [`slots.${slotKey}.updatedAt`]: slotPayload.updatedAt });
+      await updateDoc(agendaRef, { 
+        [`slots.${slotKey}.status`]: 'cancelled', 
+        [`slots.${slotKey}.adminNotes`]: slotPayload.adminNotes, 
+        [`slots.${slotKey}.updatedAt`]: slotPayload.updatedAt 
+      });
+      setCurrentMonthData({ ...currentMonthData!, [slotKey]: { ...currentMonthData![slotKey], ...slotPayload } as any });
+
       if (patientId) {
-        const patRef = doc(db, "patients", patientId);
-        batch.update(patRef, { [`careTeam.${selectedProfId}.noShowCount`]: increment(1), [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString() });
+        try {
+          await updateDoc(doc(db, "patients", patientId), { 
+            [`careTeam.${selectedProfId}.noShowCount`]: increment(1), 
+            [`careTeam.${selectedProfId}.nextAppointment`]: null,
+            [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString() 
+          });
+          loadPatients();
+        } catch (err) { console.warn("Aviso: Agenda cancelada, pero sin permisos para poner la falta.", err); }
       }
-      await batch.commit();
-      if (currentMonthData) {
-        const updatedSlots = { ...currentMonthData };
-        updatedSlots[slotKey] = { ...updatedSlots[slotKey], ...slotPayload as any };
-        setCurrentMonthData(updatedSlots);
-      }
-      loadPatients();
-    } catch(e) { console.error(e); } finally { setLoading(false); }
+    } catch(e: any) { 
+      console.error(e); 
+      alert("Error al marcar Ausencia: " + e.message);
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const handleSaveAppointment = async (e: React.FormEvent) => {
@@ -817,20 +813,82 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   };
 
   const handleSoftCancel = async (slotKey: string) => {
-    const reason = window.prompt("¿Motivo de cancelación?", "Cancelación del paciente"); if (reason === null) return;
-    setLoading(true); try { const year = selectedDate.getFullYear(); const month = selectedDate.getMonth(); const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
-    const slotPayload = { status: 'cancelled', adminNotes: `[CANCELADO] ${reason}`, updatedAt: new Date().toISOString() };
-    await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotKey}.status`]: 'cancelled', [`slots.${slotKey}.adminNotes`]: slotPayload.adminNotes });
-    setCurrentMonthData({ ...currentMonthData!, [slotKey]: { ...currentMonthData![slotKey], ...slotPayload } as any }); } catch (e) { console.error(e); } finally { setLoading(false); }
+    const reason = window.prompt("¿Motivo de cancelación?", "Cancelación del paciente"); 
+    if (reason === null) return;
+    
+    setLoading(true); 
+    try { 
+      const year = selectedDate.getFullYear(); 
+      const month = selectedDate.getMonth(); 
+      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`;
+      const slotPayload = { status: 'cancelled', adminNotes: `[CANCELADO] ${reason}`, updatedAt: new Date().toISOString() };
+      
+      await updateDoc(doc(db, "professionals", selectedProfId, "availability", monthDocId), { 
+        [`slots.${slotKey}.status`]: 'cancelled', 
+        [`slots.${slotKey}.adminNotes`]: slotPayload.adminNotes 
+      });
+      setCurrentMonthData({ ...currentMonthData!, [slotKey]: { ...currentMonthData![slotKey], ...slotPayload } as any }); 
+
+      if (currentMonthData![slotKey].patientId) {
+        try {
+          await updateDoc(doc(db, "patients", currentMonthData![slotKey].patientId!), {
+            [`careTeam.${selectedProfId}.nextAppointment`]: null,
+            [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString()
+          });
+          loadPatients();
+        } catch (err) { console.warn("Aviso: No se pudo actualizar el expediente del paciente por permisos.", err); }
+      }
+    } catch (e: any) { 
+      console.error(e); 
+      alert("Error al cancelar: " + e.message); 
+    } finally { 
+      setLoading(false); 
+    }
   };
+
   const handleReopenSlot = async (slotKey: string) => {
-    if (!window.confirm("¿Reabrir este horario?")) return; setLoading(true); try { const year = selectedDate.getFullYear(); const month = selectedDate.getMonth();
-    const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; const originalTime = currentMonthData![slotKey].time; const cleanSlotLocal: AgendaSlot = { status: 'available', time: originalTime, duration: workConfig.durationMinutes, price: workConfig.defaultPrice };
-    const batch = writeBatch(db); const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
-    batch.update(agendaRef, { [`slots.${slotKey}.status`]: 'available', [`slots.${slotKey}.price`]: workConfig.defaultPrice, [`slots.${slotKey}.duration`]: workConfig.durationMinutes, [`slots.${slotKey}.patientId`]: deleteField(), [`slots.${slotKey}.patientName`]: deleteField(), [`slots.${slotKey}.patientExternalPhone`]: deleteField(), [`slots.${slotKey}.patientExternalEmail`]: deleteField(), [`slots.${slotKey}.adminNotes`]: deleteField(), [`slots.${slotKey}.paymentStatus`]: deleteField() });
-    if (currentMonthData![slotKey].patientId) { batch.update(doc(db, "patients", currentMonthData![slotKey].patientId!), { [`careTeam.${selectedProfId}.nextAppointment`]: null }); } await batch.commit();
-    setCurrentMonthData({ ...currentMonthData!, [slotKey]: cleanSlotLocal }); } catch (e) { console.error(e); } finally { setLoading(false); }
+    if (!window.confirm("¿Reabrir este horario?")) return; 
+    
+    setLoading(true); 
+    try { 
+      const year = selectedDate.getFullYear(); 
+      const month = selectedDate.getMonth();
+      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; 
+      const originalTime = currentMonthData![slotKey].time; 
+      const patientIdToUpdate = currentMonthData![slotKey].patientId;
+      
+      const cleanSlotLocal: AgendaSlot = { status: 'available', time: originalTime, duration: workConfig.durationMinutes, price: workConfig.defaultPrice };
+      
+      const agendaRef = doc(db, "professionals", selectedProfId, "availability", monthDocId);
+      await updateDoc(agendaRef, { 
+        [`slots.${slotKey}.status`]: 'available', 
+        [`slots.${slotKey}.price`]: workConfig.defaultPrice, 
+        [`slots.${slotKey}.duration`]: workConfig.durationMinutes, 
+        [`slots.${slotKey}.patientId`]: deleteField(), 
+        [`slots.${slotKey}.patientName`]: deleteField(), 
+        [`slots.${slotKey}.patientExternalPhone`]: deleteField(), 
+        [`slots.${slotKey}.patientExternalEmail`]: deleteField(), 
+        [`slots.${slotKey}.adminNotes`]: deleteField(), 
+        [`slots.${slotKey}.paymentStatus`]: deleteField() 
+      });
+      setCurrentMonthData({ ...currentMonthData!, [slotKey]: cleanSlotLocal }); 
+
+      if (patientIdToUpdate) { 
+        try {
+          await updateDoc(doc(db, "patients", patientIdToUpdate), { 
+            [`careTeam.${selectedProfId}.nextAppointment`]: null 
+          }); 
+          loadPatients();
+        } catch (err) { console.warn("Aviso: El espacio se abrió pero el expediente no se actualizó.", err); }
+      } 
+    } catch (e: any) { 
+      console.error(e); 
+      alert("Error al reabrir: " + e.message);
+    } finally { 
+      setLoading(false); 
+    }
   };
+
   const handleSmartReleaseCheck = async (slotKey: string) => {
     if (waitlist.length > 0) { if (window.confirm(`⚠️ Hay ${waitlist.length} personas en espera. ¿ASIGNAR espacio a la lista?`)) { setSlotToReassign(slotKey); setIsWaitlistSelectorOpen(true); return; } }
     if(window.confirm("¿CANCELAR la cita actual?")) { handleSoftCancel(slotKey); }
