@@ -38,14 +38,20 @@ export default function AdminBulkTools() {
     setLoading(true);
     setLogs([]);
     addLog("Iniciando carga de Tags...");
+    console.log("=== INICIO PROCESO DE TAGS ===");
     
     try {
-      const lines = csvText.split('\n').filter(l => l.trim() !== '');
+      // FIX: Remover BOM y manejar saltos de línea universales
+      const cleanText = csvText.replace(/^\uFEFF/, '');
+      const lines = cleanText.split(/\r?\n/).filter(l => l.trim() !== '');
+      console.log(`[CSV] Total de líneas detectadas: ${lines.length}`);
+
       // CORRECCIÓN 1: Usamos ';' como delimitador para evitar romper descripciones con comas
       const headers = lines[0].split(';').map(h => h.trim().toLowerCase());
+      console.log("[CSV] Cabeceras detectadas:", headers);
       
       if (!headers.includes('etiqueta') || !headers.includes('categoria')) {
-        throw new Error("El CSV debe tener cabeceras: categoria; etiqueta; sinonimos");
+        throw new Error(`El CSV debe tener cabeceras: categoria; etiqueta; sinonimos. Encontradas: ${headers.join(', ')}`);
       }
 
       addLog("Descargando mapa de tags existentes...");
@@ -64,11 +70,14 @@ export default function AdminBulkTools() {
       for (let i = 1; i < lines.length; i++) {
         // CORRECCIÓN 1: Split por punto y coma
         const row = lines[i].split(';');
-        if (row.length < 2) continue;
+        if (row.length < 2) {
+          console.warn(`[CSV] Fila ${i + 1} ignorada (menos de 2 columnas):`, lines[i]);
+          continue;
+        }
 
         const tagData: CsvTagRow = {
-          categoria: row[0].trim(),
-          etiqueta: row[1].trim(),
+          categoria: row[0]?.trim() || '',
+          etiqueta: row[1]?.trim() || '',
           sinonimos: row[2]?.trim() || ''
         };
 
@@ -83,8 +92,8 @@ export default function AdminBulkTools() {
         batch.set(newTagRef, {
           category: tagData.categoria,
           label: tagData.etiqueta,
-          // Convertimos sinónimos a array minúsculas
-          keywords: tagData.sinonimos.split(',').map(s => s.trim().toLowerCase()).filter(s => s),
+          // FIX: Validación segura para evitar fallos si sinónimos viene vacío
+          keywords: tagData.sinonimos ? tagData.sinonimos.split(',').map(s => s.trim().toLowerCase()).filter(s => s) : [],
           createdAt: serverTimestamp()
         });
 
@@ -93,6 +102,7 @@ export default function AdminBulkTools() {
         addedCount++;
 
         if (opCount >= 450) {
+          console.log(`[FIREBASE] Ejecutando commit intermedio. Operaciones en lote: ${opCount}`);
           addLog("💾 Guardando lote intermedio...");
           await batch.commit();
           batch = writeBatch(db);
@@ -101,12 +111,20 @@ export default function AdminBulkTools() {
         setProgress(Math.round((i / lines.length) * 100));
       }
 
-      if (opCount > 0) await batch.commit();
-      addLog(`✅ Finalizado: ${addedCount} tags nuevos.`);
+      console.log(`[FIREBASE] Proceso terminado. Documentos nuevos listos para subir: ${addedCount}`);
+      if (opCount > 0) {
+        await batch.commit();
+      } else if (addedCount === 0) {
+        addLog("⚠️ No se subió ningún tag nuevo (todos eran duplicados o vacíos).");
+      }
+      
+      if (addedCount > 0) {
+        addLog(`✅ Finalizado: ${addedCount} tags nuevos.`);
+      }
 
     } catch (error: any) {
       addLog(`❌ Error: ${error.message}`);
-      console.error(error);
+      console.error("=== ERROR CRÍTICO EN TAGS ===", error);
     } finally {
       setLoading(false);
     }
@@ -117,9 +135,13 @@ export default function AdminBulkTools() {
     setLoading(true);
     setLogs([]);
     addLog("Iniciando carga de Tareas y Estructura...");
+    console.log("=== INICIO PROCESO DE TAREAS ===");
 
     try {
-      const lines = csvText.split('\n').filter(l => l.trim() !== '');
+      // FIX: Remover BOM y manejar saltos de línea universales
+      const cleanText = csvText.replace(/^\uFEFF/, '');
+      const lines = cleanText.split(/\r?\n/).filter(l => l.trim() !== '');
+      console.log(`[CSV] Total de líneas detectadas: ${lines.length}`);
       
       addLog("Analizando estructura actual...");
       const structureMap = new Map<string, string>(); 
@@ -144,10 +166,12 @@ export default function AdminBulkTools() {
 
       let batch = writeBatch(db);
       let opCount = 0;
+      let addedTasksCount = 0;
 
       const checkBatch = async () => {
         opCount++;
         if (opCount >= 450) {
+          console.log(`[FIREBASE] Ejecutando commit intermedio. Operaciones en lote: ${opCount}`);
           await batch.commit();
           batch = writeBatch(db);
           opCount = 0;
@@ -158,19 +182,19 @@ export default function AdminBulkTools() {
       for (let i = 1; i < lines.length; i++) {
         // CORRECCIÓN 1: Split por Punto y Coma (;)
         const cols = lines[i].split(';');
-        if (cols.length < 4) continue;
+        if (cols.length < 4) {
+          console.warn(`[CSV] Fila ${i + 1} ignorada (menos de 4 columnas):`, lines[i]);
+          continue;
+        }
 
         // Mapeo ajustado. Asumimos orden: 
         // 0: tipo, 1: profesion, 2: categoria, 3: subcat, 4: tarea, 5: desc, 6: tags, 7: edades
-        // Si el CSV no tiene columna tipo al inicio, ajusta los índices. 
-        // AQUÍ ASUMO QUE AGREGAS LA COLUMNA 'TIPO' AL INICIO DEL CSV.
-        
         const row: CsvTaskRow = {
-          tipo: cols[0].trim(),         // Ej: "rutina" o vacío
-          profesion: cols[1].trim(),
-          categoria: cols[2].trim(),
-          subcategoria: cols[3].trim(),
-          tarea: cols[4].trim(),
+          tipo: cols[0]?.trim() || '',         // Ej: "rutina" o vacío
+          profesion: cols[1]?.trim() || '',
+          categoria: cols[2]?.trim() || '',
+          subcategoria: cols[3]?.trim() || '',
+          tarea: cols[4]?.trim() || '',
           descripcion: cols[5]?.trim() || '',
           tags: cols[6]?.trim() || '',
           edades: cols[7]?.trim() || ''
@@ -225,7 +249,7 @@ export default function AdminBulkTools() {
           description: row.descripcion,
           
           // CORRECCIÓN 2: Nombres de campos compatibles con AdminCatalogTree
-          // CORRECCIÓN 3: Conversión a Array usando pipe '|'
+          // CORRECCIÓN 3: Conversión a Array usando pipe '|' (FIX: validación segura si viene vacío)
           targetAge: row.edades ? row.edades.split('|').map(s => s.trim()) : [], 
           tags: row.tags ? row.tags.split('|').map(s => s.trim()) : [],
 
@@ -237,16 +261,25 @@ export default function AdminBulkTools() {
           _collection: taskCollection
         });
         await checkBatch();
+        addedTasksCount++;
         
         setProgress(Math.round((i / lines.length) * 100));
       }
 
-      await batch.commit();
-      addLog("✅ Carga completada con éxito.");
+      console.log(`[FIREBASE] Proceso terminado. Tareas listas para subir: ${addedTasksCount}`);
+      if (opCount > 0) {
+        await batch.commit();
+      } else if (addedTasksCount === 0) {
+        addLog("⚠️ No se subió ninguna tarea (archivo vacío o filas inválidas).");
+      }
+
+      if (addedTasksCount > 0) {
+        addLog("✅ Carga completada con éxito.");
+      }
 
     } catch (e: any) {
       addLog(`❌ Error Crítico: ${e.message}`);
-      console.error(e);
+      console.error("=== ERROR CRÍTICO EN TAREAS ===", e);
     } finally {
       setLoading(false);
     }

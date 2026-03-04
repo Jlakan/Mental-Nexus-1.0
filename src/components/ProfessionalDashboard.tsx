@@ -19,23 +19,30 @@ interface Props {
 
 // --- COMPONENTES UI ADAPTADOS A TAILWIND (V2 STYLE) ---
 
-const DoughnutChart = ({ percent, color, size = 80, label }: any) => {
+const DualDoughnutChart = ({ percentAdherence, percentProgress, size = 80 }: any) => {
   return (
     <div className="relative flex justify-center items-center" style={{ width: size, height: size }}>
       <div
         className="absolute inset-0 rounded-full"
-        style={{ background: `conic-gradient(${color} ${percent}%, #334155 0)` }}
+        style={{ background: `conic-gradient(#3b82f6 ${percentAdherence}%, #334155 0)` }}
+        title={`Adherencia al día: ${percentAdherence}%`}
       ></div>
-      <div className="absolute inset-2 rounded-full bg-slate-800 flex flex-col justify-center items-center">
-        <span className="text-lg font-bold text-white">{percent}%</span>
-        {label && <span className="text-[9px] text-slate-400 uppercase tracking-wide">{label}</span>}
+      <div className="absolute inset-[8px] rounded-full bg-slate-800"></div>
+      <div
+        className="absolute inset-[12px] rounded-full"
+        style={{ background: `conic-gradient(#a855f7 ${percentProgress}%, #334155 0)` }}
+        title={`Avance total del plan: ${percentProgress}%`}
+      ></div>
+      <div className="absolute inset-[20px] rounded-full bg-slate-800 flex flex-col justify-center items-center leading-none">
+        <span className="text-[14px] font-bold text-white">{percentAdherence}%</span>
+        <span className="text-[7px] text-slate-400 uppercase tracking-wide mt-0.5">AL DÍA</span>
       </div>
     </div>
   );
 };
 
 const TaskProgressBar = ({ task }: { task: any }) => {
-  const completed = task.completionHistory?.length || 0;
+  const completed = task.completionHistory ? Object.keys(task.completionHistory).length : 0;
   const total = task.totalVolumeExpected || 1;
   const percent = Math.min(100, Math.round((completed / total) * 100));
 
@@ -86,26 +93,46 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) =
   const activeTasks = tasks.filter((t:any) => t.status !== 'completed');
   const completedTasks = tasks.filter((t:any) => t.status === 'completed');
 
-  let totalExpected = 0;
+  let totalExpectedFinal = 0;
+  let totalExpectedToDate = 0;
   let totalDone = 0;
+
   activeTasks.forEach((t:any) => {
-    totalExpected += (t.totalVolumeExpected || 1);
-    totalDone += (t.completionHistory?.length || 0);
+    const expectedFinal = (t.totalVolumeExpected || 1);
+    const done = t.completionHistory ? Object.keys(t.completionHistory).length : 0;
+    
+    totalExpectedFinal += expectedFinal;
+    totalDone += done;
+
+    const createdAt = t.createdAt?.toDate ? t.createdAt.toDate() : new Date();
+    const durationDays = (t.durationWeeks || 1) * 7;
+    const now = new Date();
+    const diffTime = Math.max(0, now.getTime() - createdAt.getTime());
+    const elapsedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
+    
+    let expectedToday = Math.ceil((expectedFinal / durationDays) * elapsedDays);
+    if (expectedToday > expectedFinal) expectedToday = expectedFinal;
+    
+    totalExpectedToDate += expectedToday;
   });
-  const globalAdherence = totalExpected > 0 ? Math.round((totalDone / totalExpected) * 100) : 0;
+
+  const globalProgress = totalExpectedFinal > 0 ? Math.round((totalDone / totalExpectedFinal) * 100) : 0;
+  let dailyAdherence = totalExpectedToDate > 0 ? Math.round((totalDone / totalExpectedToDate) * 100) : 0;
+  if (dailyAdherence > 100) dailyAdherence = 100;
+
   const routinesCount = activeTasks.filter((t:any) => t.type === 'routine').length;
   const missionsCount = activeTasks.filter((t:any) => t.type !== 'routine').length;
 
   return (
     <div className="bg-slate-800 rounded-xl shadow-lg mb-6 flex flex-col sm:flex-row overflow-hidden border border-slate-700">
       {/* 1. IZQUIERDA: ADHERENCIA */}
-      <div className="p-4 bg-slate-800/50 border-b sm:border-b-0 sm:border-r border-slate-700 flex flex-col items-center justify-center min-w-[140px]">
-        <DoughnutChart percent={globalAdherence} color="#3b82f6" size={70} label="Adherencia" />
+      <div className="p-4 bg-slate-800/50 border-b sm:border-b-0 sm:border-r border-slate-700 flex flex-col items-center justify-center min-w-[150px]">
+        <DualDoughnutChart percentAdherence={dailyAdherence} percentProgress={globalProgress} size={80} />
         <div className="mt-3 text-center w-full">
           <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Carga Activa ({activeTasks.length})</div>
           <div className="flex justify-center gap-2 text-[10px]">
-            <span className="bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded border border-purple-500/30">🟣 {routinesCount} Rut</span>
-            <span className="bg-orange-900/40 text-orange-300 px-2 py-0.5 rounded border border-orange-500/30">🟠 {missionsCount} Mis</span>
+            <span className="text-blue-400 font-bold whitespace-nowrap">🔵 Día: {dailyAdherence}%</span>
+            <span className="text-purple-400 font-bold whitespace-nowrap">🟣 Tot: {globalProgress}%</span>
           </div>
         </div>
       </div>
@@ -216,12 +243,25 @@ export default function ProfessionalDashboard({ user }: Props) {
         const data = profSnap.data();
         setProfData(data);
         
-        // --- CORRECCIÓN AQUÍ: Usar documentId() en lugar de "uid" ---
+        // --- CORRECCIÓN AQUÍ: Buscar en ambas colecciones (assistants y users) ---
         if (data.authorizedAssistants?.length > 0) {
-          // Buscamos documentos cuyo ID esté en el array de autorizados
-          const qAssist = query(collection(db, "users"), where(documentId(), "in", data.authorizedAssistants));
+          // 1. Buscamos en la colección "assistants"
+          const qAssist = query(collection(db, "assistants"), where(documentId(), "in", data.authorizedAssistants));
           const snapAssist = await getDocs(qAssist);
-          setAssistants(snapAssist.docs.map(d => ({ uid: d.id, ...d.data() })));
+          let loadedAssistants = snapAssist.docs.map(d => ({ uid: d.id, ...d.data() }));
+
+          // 2. Buscamos en la colección "users" (por si hay profesionales/usuarios en rol multitask)
+          const qUsers = query(collection(db, "users"), where(documentId(), "in", data.authorizedAssistants));
+          const snapUsers = await getDocs(qUsers);
+          
+          // 3. Unimos ambas listas evitando duplicados por si acaso
+          snapUsers.docs.forEach(d => {
+            if (!loadedAssistants.find(a => a.uid === d.id)) {
+              loadedAssistants.push({ uid: d.id, ...d.data() });
+            }
+          });
+
+          setAssistants(loadedAssistants);
         }
         
         if (data.professionalCode) {
@@ -251,8 +291,6 @@ export default function ProfessionalDashboard({ user }: Props) {
       }
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
-
-  // --- FUNCIONES DE NEGOCIO (V1) ---
 
   const handleNavigate = (view: string) => {
     setActiveView(view);
@@ -543,6 +581,11 @@ export default function ProfessionalDashboard({ user }: Props) {
                         <div>
                           <div className="font-bold text-white group-hover:text-nexus-cyan transition-colors">{p.fullName}</div>
                           <div className="text-xs text-slate-500">{p.email}</div>
+                          {p.careTeam?.[user.uid]?.nextAppointment && (
+                            <div className="text-[10px] text-blue-400 mt-1 font-bold">
+                              📅 Próxima cita: {new Date(p.careTeam[user.uid].nextAppointment).toLocaleDateString('es-ES', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          )}
                         </div>
                       </div>
                       <button
@@ -630,7 +673,11 @@ export default function ProfessionalDashboard({ user }: Props) {
               <h2 className="text-xl font-bold text-white mb-4">Equipo Clínico Autorizado</h2>
               {assistants.length === 0 ? <p className="text-slate-500">No hay asistentes vinculados.</p> : (
                 <div className="space-y-2">
-                  {assistants.map(a=>(<div key={a.uid} className="p-3 bg-slate-800 rounded text-white">{a.displayName}</div>))}
+                  {assistants.map(a=>(
+                    <div key={a.uid} className="p-3 bg-slate-800 rounded text-white">
+                      {a.displayName || a.fullName || a.name || a.email || "Usuario sin nombre"}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -655,6 +702,11 @@ export default function ProfessionalDashboard({ user }: Props) {
                     <span className="bg-blue-900/40 text-blue-300 border border-blue-500/30 px-3 py-1 rounded-full text-xs font-bold">
                       💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0}
                     </span>
+                    {selectedPatient.careTeam?.[user.uid]?.nextAppointment && (
+                      <span className="bg-slate-700/50 text-slate-300 border border-slate-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+                        🗓️ Cita: {new Date(selectedPatient.careTeam[user.uid].nextAppointment).toLocaleDateString('es-ES', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -705,7 +757,7 @@ export default function ProfessionalDashboard({ user }: Props) {
                               <button onClick={() => handleDeleteTask(t.id, isRoutine)} className="p-1.5 hover:bg-slate-700 rounded text-red-400" title="Eliminar">🗑️</button>
                             </div>
                           </div>
-                          <div className="text-xs text-slate-400 mb-3 truncate">{t.description || "Sin instrucciones."}</div>
+                          <div className="text-xs text-slate-400 mb-3 truncate">{t.customInstructions || t.description || "Sin instrucciones."}</div>
                           <TaskProgressBar task={t} />
                         </div>
                       );

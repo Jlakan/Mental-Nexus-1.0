@@ -156,10 +156,15 @@ export const calculateAggregatedStats = (
     catStats.assignedCount++;
 
     // --- 2. Análisis Temporal (Heatmaps) ---
-    // Usamos completionHistory si existe, si no, intentamos con completedAt directo
-    const history = (task as any).completionHistory || (task.completedAt ? [{ completedAt: task.completedAt, selfRating: task.rating }] : []);
+    // 🛠️ CORRECCIÓN: Validación estricta para asegurar que history sea un Array válido
+    const history = Array.isArray((task as any).completionHistory) 
+        ? (task as any).completionHistory 
+        : ((task as any).completedAt ? [{ completedAt: (task as any).completedAt, selfRating: (task as any).rating }] : []);
 
     history.forEach((record: any) => {
+        // 🛠️ CORRECCIÓN: Evitar fallos si el registro dentro del Array está corrupto o vacío
+        if (!record || !record.completedAt) return;
+
         // Manejo seguro de fechas (Firestore Timestamp vs JS Date)
         const d = record.completedAt?.toDate ? record.completedAt.toDate() : new Date(record.completedAt);
         

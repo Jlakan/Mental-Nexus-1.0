@@ -240,7 +240,11 @@ const calculateWeeklyPulse = (assignment: Assignment): number[] => {
   }
   // -----------------------------------------------------------------
 
-  const history = assignment.completionHistory || [];
+  // 🛠️ CORRECCIÓN: Nos aseguramos de que history sea un Array real
+  const history = Array.isArray(assignment.completionHistory) 
+    ? assignment.completionHistory 
+    : [];
+    
   const pauses = assignment.pauses || [];
   const frequency = assignment.frequency || { lun:1, mar:1, mie:1, jue:1, vie:1, sab:1, dom:1 };
   const originalTarget = Object.keys(frequency).length; 
@@ -293,7 +297,11 @@ const calculateWeeklyPulse = (assignment: Assignment): number[] => {
 };
 
 export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis & { weeklyPulse: number[] } => {
-  const history = assignment.completionHistory || [];
+  // 🛠️ CORRECCIÓN: Misma validación estricta para el historial
+  const history = Array.isArray(assignment.completionHistory) 
+    ? assignment.completionHistory 
+    : [];
+
   const now = new Date();
   const clinicalStatus = assignment.contextSnapshot ? classifyUserStatus(assignment.contextSnapshot) : 'active';
 
@@ -347,8 +355,9 @@ export const analyzeAssignment = (assignment: Assignment): AssignmentAnalysis & 
   }
 
   // FIX: Validación en mapeo de fechas únicas para evitar crash
+  // 🛠️ CORRECCIÓN: Se agregó r && r.completedAt
   const uniqueDays = new Set(history
-    .filter(r => r.completedAt) // Filtramos registros corruptos
+    .filter(r => r && r.completedAt) // Filtramos registros corruptos o nulos
     .map(r => ((r.completedAt as any).toDate 
         ? (r.completedAt as any).toDate() 
         : new Date(r.completedAt)).toISOString().split('T')[0])

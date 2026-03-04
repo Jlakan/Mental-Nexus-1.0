@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import {
   collection, getDocs, doc, deleteDoc, updateDoc,
-  getDoc, query, where, setDoc
+  getDoc, query, where, setDoc, writeBatch
 } from "firebase/firestore";
 import { db, auth } from '../services/firebase';
 
@@ -40,6 +40,9 @@ export default function AdminPanel() {
   // --- NUEVOS ESTADOS PARA FILTROS VISUALES ---
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'top' | 'worst'>('all');
+
+  // --- ESTADO PARA SISTEMA DE TAGS ---
+  const [isInitializingTags, setIsInitializingTags] = useState(false);
 
   // --- 1. CARGA DE DATOS ---
   const fetchAll = async () => {
@@ -107,6 +110,47 @@ export default function AdminPanel() {
         alert("Error al cargar inteligencia global.");
     } finally {
         setLoadingAnalytics(false);
+    }
+  };
+
+  // --- LÓGICA: INICIALIZAR SISTEMA DE TAGS ---
+  const handleInitializeTagsSystem = async () => {
+    setIsInitializingTags(true);
+    try {
+      const batch = writeBatch(db);
+
+      // Paso 1: Hacer un getDoc a la ruta system/tagsMetadata
+      const metadataRef = doc(db, 'system', 'tagsMetadata');
+      const metadataSnap = await getDoc(metadataRef);
+
+      // Paso 2: Si el documento NO existe, usar el batch para crearlo
+      if (!metadataSnap.exists()) {
+        batch.set(metadataRef, {
+          psicologia_version: 1,
+          nutricion_version: 1,
+          lenguaje_version: 1
+        });
+      }
+
+      // Paso 3: Revisar/crear los documentos maestros de los diccionarios
+      const dictRefs = [
+        doc(db, 'tagsDictionaries', 'psicologia'),
+        doc(db, 'tagsDictionaries', 'nutricion'),
+        doc(db, 'tagsDictionaries', 'lenguaje')
+      ];
+
+      dictRefs.forEach((ref) => {
+        batch.set(ref, { tags: [] }, { merge: true });
+      });
+
+      // Paso 4: Ejecutar el batch
+      await batch.commit();
+      alert("Sistema de Tags inicializado correctamente.");
+    } catch (error) {
+      console.error("Error al inicializar el sistema de tags:", error);
+      alert("Error al inicializar el sistema de tags.");
+    } finally {
+      setIsInitializingTags(false);
     }
   };
 
@@ -263,7 +307,16 @@ export default function AdminPanel() {
       {/* HEADER */}
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px'}}>
         <h2 style={{color:'#263238', margin:0}}>Panel de Administración</h2>
-        <button onClick={() => auth.signOut()} style={{padding:'8px 15px', background:'#f44336', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>Cerrar Sesión</button>
+        <div style={{display:'flex', gap:'10px'}}>
+          <button 
+            onClick={handleInitializeTagsSystem} 
+            disabled={isInitializingTags}
+            style={{padding:'8px 15px', background:'#FF9800', color:'white', border:'none', borderRadius:'4px', cursor: isInitializingTags ? 'not-allowed' : 'pointer', fontWeight:'bold'}}
+          >
+            {isInitializingTags ? 'Inicializando...' : 'Inicializar Sistema de Tags'}
+          </button>
+          <button onClick={() => auth.signOut()} style={{padding:'8px 15px', background:'#f44336', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>Cerrar Sesión</button>
+        </div>
       </div>
      
       {/* NAVEGACIÓN */}
