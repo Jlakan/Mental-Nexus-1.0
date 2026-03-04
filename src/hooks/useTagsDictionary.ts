@@ -1,9 +1,7 @@
-// src/hooks/useTagsDictionary.ts
-
 import { useState, useEffect } from 'react';
-import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // Ajusta esta ruta a tu configuración de Firebase
-import { TagEntry, TagsCache, SystemTagsMetadata } from '../types/tags';
+import { doc, getDoc } from 'firebase/firestore'; // <-- Corrección: Se eliminaron 'collection' y 'getDocs'
+import { db } from '../firebaseConfig'; // Si el error persiste, deberás ajustar esta ruta al archivo real
+import type { TagEntry, TagsCache, SystemTagsMetadata } from '../types/tags'; // <-- Corrección: Se agregó 'type'
 
 export const useTagsDictionary = (professionType: string) => {
   const [dictionary, setDictionary] = useState<TagEntry[]>([]);

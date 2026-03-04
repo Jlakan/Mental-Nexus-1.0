@@ -1,7 +1,7 @@
 // src/components/PredictiveTagSearch.tsx
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { TagEntry } from '../types/tags';
+import type { TagEntry } from '../types/tags'; // <-- Corrección: Se agregó 'type'
 
 interface PredictiveTagSearchProps {
   dictionary: TagEntry[];

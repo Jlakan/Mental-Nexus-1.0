@@ -1,11 +1,9 @@
-// src/components/PatientTagsManager.tsx
-
 import React from 'react';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // Ajusta la ruta a tu config de Firebase
+import { db } from '../firebaseConfig'; // Si el error persiste, deberás ajustar esta ruta al archivo real
 import { useTagsDictionary } from '../hooks/useTagsDictionary';
 import { PredictiveTagSearch } from './PredictiveTagSearch';
-import { TagEntry } from '../types/tags';
+import type { TagEntry } from '../types/tags'; // <-- Corrección: Se agregó 'type'
 
 interface PatientTagsManagerProps {
   patientId: string;

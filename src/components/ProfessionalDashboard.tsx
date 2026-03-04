@@ -120,9 +120,6 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) =
   let dailyAdherence = totalExpectedToDate > 0 ? Math.round((totalDone / totalExpectedToDate) * 100) : 0;
   if (dailyAdherence > 100) dailyAdherence = 100;
 
-  const routinesCount = activeTasks.filter((t:any) => t.type === 'routine').length;
-  const missionsCount = activeTasks.filter((t:any) => t.type !== 'routine').length;
-
   return (
     <div className="bg-slate-800 rounded-xl shadow-lg mb-6 flex flex-col sm:flex-row overflow-hidden border border-slate-700">
       {/* 1. IZQUIERDA: ADHERENCIA */}
