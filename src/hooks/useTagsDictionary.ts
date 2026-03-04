@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore'; // <-- Corrección: Se eliminaron 'collection' y 'getDocs'
-import { db } from '../firebaseConfig'; // Si el error persiste, deberás ajustar esta ruta al archivo real
+import { db } from '../services/firebase';
 import type { TagEntry, TagsCache, SystemTagsMetadata } from '../types/tags'; // <-- Corrección: Se agregó 'type'
 
 export const useTagsDictionary = (professionType: string) => {

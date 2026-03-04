@@ -1,6 +1,6 @@
 import React from 'react';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // Si el error persiste, deberás ajustar esta ruta al archivo real
+import { db } from '../services/firebase';
 import { useTagsDictionary } from '../hooks/useTagsDictionary';
 import { PredictiveTagSearch } from './PredictiveTagSearch';
 import type { TagEntry } from '../types/tags'; // <-- Corrección: Se agregó 'type'
