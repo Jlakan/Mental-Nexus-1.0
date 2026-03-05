@@ -11,6 +11,7 @@ import AgendaView from './agenda';
 import AssignmentModal from './AssignmentModal';
 import HistoryModal from './HistoryModal';
 import DashboardMenu from './DashboardMenu';
+import PatientDirectory from './PatientDirectory';
 import { analyzeCatalogBatch } from '../utils/ClinicalEngine';
 
 interface Props {
@@ -240,18 +241,14 @@ export default function ProfessionalDashboard({ user }: Props) {
         const data = profSnap.data();
         setProfData(data);
         
-        // --- CORRECCIÓN AQUÍ: Buscar en ambas colecciones (assistants y users) ---
         if (data.authorizedAssistants?.length > 0) {
-          // 1. Buscamos en la colección "assistants"
           const qAssist = query(collection(db, "assistants"), where(documentId(), "in", data.authorizedAssistants));
           const snapAssist = await getDocs(qAssist);
           let loadedAssistants = snapAssist.docs.map(d => ({ uid: d.id, ...d.data() }));
 
-          // 2. Buscamos en la colección "users" (por si hay profesionales/usuarios en rol multitask)
           const qUsers = query(collection(db, "users"), where(documentId(), "in", data.authorizedAssistants));
           const snapUsers = await getDocs(qUsers);
           
-          // 3. Unimos ambas listas evitando duplicados por si acaso
           snapUsers.docs.forEach(d => {
             if (!loadedAssistants.find(a => a.uid === d.id)) {
               loadedAssistants.push({ uid: d.id, ...d.data() });
@@ -266,22 +263,37 @@ export default function ProfessionalDashboard({ user }: Props) {
           const snapPats = await getDocs(qPats);
           const pending: any[] = [];
           const active: any[] = [];
+          
           snapPats.docs.forEach(d => {
             const pData = d.data();
             const pId = d.id;
             let isMyPatientActive = false;
+            let isArchivedForMe = false;
+
             if (pData.careTeam) {
               const myEntry = Object.values(pData.careTeam).find((entry: any) => entry.professionalId === user.uid);
-              if (myEntry && (myEntry as any).active) isMyPatientActive = true;
+              if (myEntry) {
+                if ((myEntry as any).active) isMyPatientActive = true;
+                if ((myEntry as any).status === 'archived') isArchivedForMe = true;
+              }
             }
+
+            // Ignoramos a los pacientes que han sido desvinculados
+            if (isArchivedForMe || pData.isArchived) return;
+
             if (pData.isAuthorized === false || !isMyPatientActive) pending.push({ id: pId, ...pData });
             else active.push({ id: pId, ...pData });
           });
+          
           const qManual = query(collection(db, "patients"), where("linkedProfessionalId", "==", user.uid), where("isManual", "==", true));
           const snapManual = await getDocs(qManual);
           snapManual.docs.forEach(d => {
-            if(!active.find(p => p.id === d.id)) active.push({id: d.id, ...d.data()});
+            const pData = d.data();
+            // Ignorar expedientes manuales archivados
+            if (pData.isArchived) return; 
+            if(!active.find(p => p.id === d.id)) active.push({id: d.id, ...pData});
           });
+          
           setPendingPatients(pending);
           setActivePatients(active);
         }
@@ -410,13 +422,42 @@ export default function ProfessionalDashboard({ user }: Props) {
     } catch (e) { console.error(e); }
   };
 
+  const handleUnlinkPatient = async (patient: any) => {
+    if(!window.confirm(`¿Ocultar a ${patient.fullName} de tu lista? Su expediente seguirá existiendo en la base de datos, pero ya no tendrás acceso a él.`)) return;
+
+    try {
+      const patRef = doc(db, "patients", patient.id);
+      const updates: any = {};
+
+      if (patient.careTeam) {
+        const teamKey = Object.keys(patient.careTeam).find(k => patient.careTeam[k].professionalId === user.uid);
+        if (teamKey) {
+          updates[`careTeam.${teamKey}.active`] = false;
+          updates[`careTeam.${teamKey}.status`] = 'archived';
+        }
+      }
+
+      if (patient.isManual) {
+        updates.isArchived = true;
+      }
+
+      await updateDoc(patRef, updates);
+      
+      setActivePatients(prev => prev.filter(p => p.id !== patient.id));
+      setActiveView('patients_manage');
+      setSelectedPatient(null);
+    } catch (error) {
+      console.error(error);
+      alert("Error al intentar ocultar al paciente.");
+    }
+  };
+
   const filteredPatients = activePatients.filter(p => p.fullName.toLowerCase().includes(searchTerm.toLowerCase()));
 
   // --- RENDER (UI ESTILO V2 CON DATOS V1) ---
 
   if (loading) return <div className="min-h-screen bg-nexus-dark flex items-center justify-center text-nexus-cyan animate-pulse">CARGANDO SISTEMA CLÍNICO...</div>;
 
-  // --- NUEVA VALIDACIÓN DE SEGURIDAD (OPCIÓN B) ---
   if (profData && profData.isAuthorized === false) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-4">
@@ -442,7 +483,6 @@ export default function ProfessionalDashboard({ user }: Props) {
       </div>
     );
   }
-  // ------------------------------------------------
 
   return (
     <div className="flex h-screen bg-nexus-dark text-slate-200 font-sans overflow-hidden">
@@ -498,7 +538,7 @@ export default function ProfessionalDashboard({ user }: Props) {
           </div>
         </header>
 
-        {/* CONTENIDO SCROLLEABLE (Con corrección de Padding para Agenda) */}
+        {/* CONTENIDO SCROLLEABLE */}
         <div className={`flex-1 overflow-y-auto custom-scrollbar ${activeView === 'agenda' ? 'p-0' : 'p-4 md:p-8'}`}>
 
           {/* VISTA: DASHBOARD */}
@@ -540,7 +580,7 @@ export default function ProfessionalDashboard({ user }: Props) {
 
           {/* VISTA: GESTIÓN DE PACIENTES */}
           {activeView === 'patients_manage' && (
-            <div className="max-w-4xl mx-auto space-y-6">
+            <div className="max-w-6xl mx-auto space-y-6">
               {pendingPatients.length > 0 && (
                 <div className="space-y-3">
                   <h3 className="text-sm uppercase text-orange-400 font-bold tracking-wider">Solicitudes de Ingreso</h3>
@@ -556,50 +596,24 @@ export default function ProfessionalDashboard({ user }: Props) {
                 </div>
               )}
 
-              <div className="flex flex-col gap-4">
-                <div className="flex justify-between items-end">
-                  <h3 className="text-sm uppercase text-nexus-cyan font-bold tracking-wider">Directorio ({activePatients.length})</h3>
-                </div>
-                <input
-                  type="text"
-                  placeholder="🔍 Buscar paciente..."
-                  value={searchTerm}
-                  onChange={e=>setSearchTerm(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:border-nexus-cyan outline-none"
-                />
-
-                <div className="grid gap-3">
-                  {filteredPatients.map(p => (
-                    <div key={p.id} className="nexus-card hover:bg-slate-800/80 transition-colors p-4 flex justify-between items-center group">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-lg font-bold text-slate-400">
-                          {p.fullName.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="font-bold text-white group-hover:text-nexus-cyan transition-colors">{p.fullName}</div>
-                          <div className="text-xs text-slate-500">{p.email}</div>
-                          {p.careTeam?.[user.uid]?.nextAppointment && (
-                            <div className="text-[10px] text-blue-400 mt-1 font-bold">
-                              📅 Próxima cita: {new Date(p.careTeam[user.uid].nextAppointment).toLocaleDateString('es-ES', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => handleOpenPatient(p)}
-                        className="px-4 py-2 bg-slate-700 hover:bg-nexus-cyan hover:text-black rounded-full text-xs font-bold transition-all"
-                      >
-                        Expediente →
-                      </button>
-                    </div>
-                  ))}
-                  {filteredPatients.length === 0 && <div className="text-center py-10 text-slate-500">No se encontraron pacientes.</div>}
-                </div>
+              {/* TÍTULO Y DIRECTORIO NUEVO */}
+              <div className="flex justify-between items-end mb-2">
+                <h3 className="text-sm uppercase text-nexus-cyan font-bold tracking-wider">
+                  Directorio ({activePatients.length})
+                </h3>
               </div>
+              
+              <PatientDirectory 
+                patients={activePatients}
+                professionalId={user.uid}
+                onOpenPatient={handleOpenPatient}
+                onUnlink={handleUnlinkPatient}
+                onRegisterAttendance={handleRegisterAttendance}
+              />
             </div>
           )}
 
-          {/* VISTA: AGENDA (FULL SCREEN FIX) */}
+          {/* VISTA: AGENDA */}
           {activeView === 'agenda' && (
             <div className="w-full min-h-full bg-white text-slate-900 relative">
               <AgendaView userRole="professional" currentUserId={user.uid} onBack={() => setActiveView('dashboard')} />
@@ -699,7 +713,7 @@ export default function ProfessionalDashboard({ user }: Props) {
                     <span className="bg-blue-900/40 text-blue-300 border border-blue-500/30 px-3 py-1 rounded-full text-xs font-bold">
                       💎 {selectedPatient.gamificationProfile?.wallet?.nexus || 0}
                     </span>
-                    {selectedPatient.careTeam?.[user.uid]?.nextAppointment && (
+                    {selectedPatient.careTeam?.[user.uid]?.nextAppointment && new Date(selectedPatient.careTeam[user.uid].nextAppointment) > new Date() && (
                       <span className="bg-slate-700/50 text-slate-300 border border-slate-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
                         🗓️ Cita: {new Date(selectedPatient.careTeam[user.uid].nextAppointment).toLocaleDateString('es-ES', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
@@ -713,6 +727,12 @@ export default function ProfessionalDashboard({ user }: Props) {
                     className={`text-xs px-3 py-2 rounded-lg font-bold transition-all shadow-lg ${hasValidAttendance(selectedPatient) ? 'bg-nexus-cyan text-black hover:bg-cyan-300' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
                   >
                     {hasValidAttendance(selectedPatient) ? '+ Asignar Tarea' : '🔓 Habilitar (1 Nexus)'}
+                  </button>
+                  <button 
+                    onClick={() => handleUnlinkPatient(selectedPatient)} 
+                    className="text-xs px-3 py-2 rounded-lg font-bold bg-red-900/40 text-red-400 hover:bg-red-500 hover:text-white border border-red-500/30 transition-all"
+                  >
+                    Desvincular
                   </button>
                 </div>
               </div>
