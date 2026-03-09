@@ -194,7 +194,6 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [activePatients, setActivePatients] = useState<any[]>([]);
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
   const [profData, setProfData] = useState<any>(null);
-  const [searchTerm] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
   const [patientTasks, setPatientTasks] = useState<any[]>([]);
   const [interventionStats, setInterventionStats] = useState<any[]>([]);
