@@ -1,5 +1,4 @@
 // src/components/PatientFilterBar.tsx
-import React from 'react';
 
 interface PatientFilterBarProps {
   searchTerm: string;

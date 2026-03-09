@@ -1,5 +1,5 @@
 // src/components/PatientDirectory.tsx
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import PatientFilterBar from './PatientFilterBar';
 import PatientCard from './PatientCard';
 

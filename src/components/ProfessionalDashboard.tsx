@@ -194,7 +194,7 @@ export default function ProfessionalDashboard({ user }: Props) {
   const [activePatients, setActivePatients] = useState<any[]>([]);
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
   const [profData, setProfData] = useState<any>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
   const [patientTasks, setPatientTasks] = useState<any[]>([]);
   const [interventionStats, setInterventionStats] = useState<any[]>([]);
@@ -452,8 +452,7 @@ export default function ProfessionalDashboard({ user }: Props) {
     }
   };
 
-  const filteredPatients = activePatients.filter(p => p.fullName.toLowerCase().includes(searchTerm.toLowerCase()));
-
+ 
   // --- RENDER (UI ESTILO V2 CON DATOS V1) ---
 
   if (loading) return <div className="min-h-screen bg-nexus-dark flex items-center justify-center text-nexus-cyan animate-pulse">CARGANDO SISTEMA CLÍNICO...</div>;
