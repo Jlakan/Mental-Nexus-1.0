@@ -3,14 +3,15 @@
 import { useState, useEffect } from 'react';
 import { 
   doc, 
+  getDoc, 
   collection, 
   query, 
   where, 
+  getDocs, 
   updateDoc, 
   increment, 
   serverTimestamp,
-  Timestamp,
-  onSnapshot
+  Timestamp 
 } from 'firebase/firestore';
 import { db, auth } from '../services/firebase';
 import { AtlasCard, AtlasButton, AtlasIcons } from './design/AtlasDesignSystem';
@@ -35,104 +36,53 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
   const [patientData, setPatientData] = useState<any>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   
-  // Modal y Tareas
+  // Modal State
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [reflection, setReflection] = useState('');
   const [rating, setRating] = useState(5);
   const [submittingTask, setSubmittingTask] = useState(false);
 
-  // Sistema Cinemático y Avatar
-  const [showAtlasVideo, setShowAtlasVideo] = useState(false);
-  const [overlayImage, setOverlayImage] = useState<string | null>(null);
-
   // ---------------------------------------------------------------------------
-  // 2. EFECTOS Y TIEMPO REAL
+  // 2. CARGA DE DATOS (Data Fetching)
   // ---------------------------------------------------------------------------
-
-  // Alternar el video de Atlas cada 60 segundos
   useEffect(() => {
-    const interval = setInterval(() => {
-      setShowAtlasVideo(true);
-    }, 60000); 
-    return () => clearInterval(interval);
-  }, []);
+    const fetchData = async () => {
+      if (!user) return;
+      setLoading(true);
 
-  // Función para disparar las notificaciones visuales (2 segundos)
-  const triggerOverlay = (imageName: string) => {
-    setOverlayImage(imageName);
-    setTimeout(() => {
-      setOverlayImage(null);
-    }, 2000);
-  };
+      try {
+        // A) Perfil del Usuario
+        const userRef = doc(db, 'patients', user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          setPatientData(userSnap.data());
+        }
 
-  // Carga de datos en tiempo real
-  useEffect(() => {
-    if (!user) return;
-    setLoading(true);
+        // B) Tareas (Assignments)
+        const tasksRef = collection(db, 'assigned_routines');
+        const q = query(tasksRef, where('patientId', '==', user.uid));
+        const tasksSnap = await getDocs(q);
+        const loadedTasks = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setTasks(loadedTasks);
 
-    // A) Perfil del Usuario
-    const userRef = doc(db, 'patients', user.uid);
-    const unsubUser = onSnapshot(userRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setPatientData(docSnap.data());
+      } catch (error) {
+        console.error("Error cargando dashboard:", error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    });
-
-    // Función manejadora de cambios en tareas
-    const handleTaskSnapshots = (snap: any, type: string) => {
-      snap.docChanges().forEach((change: any) => {
-        const data = change.doc.data();
-        const id = change.doc.id;
-
-        if (change.type === 'added') {
-          // Detectar si es una nueva asignación para lanzar el pop-up
-          if (!data.notifiedAssigned) {
-            const imgToDisplay = type === 'routine' ? 'Protocolo iniciado.png' : 'Mision asignada.png';
-            triggerOverlay(imgToDisplay);
-            updateDoc(change.doc.ref, { notifiedAssigned: true }).catch(console.error);
-          }
-          
-          setTasks(prev => {
-            if (!prev.find(t => t.id === id)) return [...prev, { id, type, ...data }];
-            return prev.map(t => t.id === id ? { id, type, ...data } : t);
-          });
-        }
-        
-        if (change.type === 'modified') {
-          setTasks(prev => prev.map(t => t.id === id ? { id, type, ...data } : t));
-        }
-        
-        if (change.type === 'removed') {
-          setTasks(prev => prev.filter(t => t.id !== id));
-        }
-      });
     };
 
-    // B) Tareas (Misiones y Rutinas en tiempo real)
-    const qRoutines = query(collection(db, 'assigned_routines'), where('patientId', '==', user.uid));
-    const unsubRoutines = onSnapshot(qRoutines, (snap) => handleTaskSnapshots(snap, 'routine'));
-
-    const qMissions = query(collection(db, 'assigned_missions'), where('patientId', '==', user.uid));
-    const unsubMissions = onSnapshot(qMissions, (snap) => handleTaskSnapshots(snap, 'mission'));
-
-    return () => {
-      unsubUser();
-      unsubRoutines();
-      unsubMissions();
-    };
+    fetchData();
   }, [user]);
 
   // ---------------------------------------------------------------------------
-  // 3. LÓGICA DE NEGOCIO Y GAMIFICACIÓN
+  // 3. LÓGICA DE NEGOCIO
   // ---------------------------------------------------------------------------
 
-  const currentXP = patientData?.gamification?.xp || patientData?.gamificationProfile?.currentXp || 0;
+  // A. Gamificación
+  const currentXP = patientData?.gamification?.xp || 0;
   const currentLevel = Math.floor(currentXP / 100) + 1;
   const xpProgress = currentXP % 100;
-  
-  const currentGold = patientData?.gamification?.gold || patientData?.gamificationProfile?.wallet?.gold || 0;
-  const currentNexus = patientData?.gamification?.nexus || patientData?.gamificationProfile?.wallet?.nexus || 0;
   
   const dbStats = patientData?.gamification?.stats || {};
   const uiStats = {
@@ -141,20 +91,15 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
     resiliencia: dbStats.STA || dbStats.stamina || 0
   };
 
-  const getAtlasImage = (level: number) => {
-    if (level <= 5) return 'atlas_1.png';
-    if (level <= 10) return 'atlas_2.png';
-    if (level <= 15) return 'atlas_3.png';
-    return 'atlas_4.png';
-  };
-
+  // B. Filtrado de Tareas
   const getTodaysTasks = () => {
     const today = new Date();
     const daysSpanish = ['dom', 'lun', 'mar', 'mie', 'jue', 'vie', 'sab'];
     const dayKey = daysSpanish[today.getDay()]; 
 
     return tasks.filter((task: any) => {
-      if (task.status === 'inactive' || task.status === 'completed') return false;
+      if (task.status === 'inactive') return false;
+
       if (task.frequency) {
         if (Array.isArray(task.frequency)) {
             return task.frequency.includes(dayKey);
@@ -168,26 +113,22 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
   const todaysTasks = getTodaysTasks();
 
+  // C. Completar Tarea
   const handleCompleteTask = async () => {
     if (!selectedTask || !user) return;
     setSubmittingTask(true);
 
     try {
-      const collectionName = selectedTask.type === 'routine' ? 'assigned_routines' : 'assigned_missions';
-      const taskRef = doc(db, collectionName, selectedTask.id);
+      const taskRef = doc(db, 'assigned_routines', selectedTask.id);
       const userRef = doc(db, 'patients', user.uid);
       
       const xpReward = (selectedTask.rewards?.xp || selectedTask.staticTaskData?.xp || 10);
       const goldReward = (selectedTask.rewards?.gold || 5);
+      
       const dateStr = new Date().toISOString().split('T')[0];
 
-      // Cálculos de progreso para disparadores visuales
-      const total = selectedTask.totalVolumeExpected || 1;
-      const currentCompleted = selectedTask.completionHistory ? Object.keys(selectedTask.completionHistory).length : 0;
-      const newCompleted = currentCompleted + 1;
-      const percent = Math.min(100, Math.round((newCompleted / total) * 100));
-
-      let taskUpdatePayload: any = {
+      // 1. Actualizar Tarea
+      await updateDoc(taskRef, {
         [`completionHistory.${dateStr}`]: {
             completedAt: new Date().toISOString(),
             rating: rating,
@@ -195,26 +136,31 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
             status: 'completed'
         },
         lastCompletedAt: serverTimestamp()
-      };
+      });
 
-      // Disparadores visuales según el tipo de tarea y el avance
-      if (selectedTask.type === 'routine') {
-        if (percent >= 80 && !selectedTask.notified80) {
-           triggerOverlay('Protocolo completado.png');
-           taskUpdatePayload.notified80 = true;
-        }
-      } else {
-        triggerOverlay('mission Succes.png');
-        taskUpdatePayload.status = 'completed'; // Las misiones únicas se cierran al completarse
-      }
-
-      await updateDoc(taskRef, taskUpdatePayload);
-
+      // 2. Actualizar Usuario
       await updateDoc(userRef, {
         'gamification.xp': increment(xpReward),
         'gamification.gold': increment(goldReward),
         'gamification.completedMissions': increment(1)
       });
+
+      // 3. Actualización Optimista
+      setPatientData((prev: any) => ({
+        ...prev,
+        gamification: {
+          ...prev.gamification,
+          xp: (prev.gamification?.xp || 0) + xpReward
+        }
+      }));
+
+      // 4. Actualizar localmente
+      setTasks(prev => prev.map(t => {
+        if (t.id === selectedTask.id) {
+            return { ...t, lastCompletedAt: Timestamp.now() };
+        }
+        return t;
+      }));
 
       setSelectedTask(null);
       setReflection('');
@@ -228,13 +174,23 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
     }
   };
 
+  // D. Desvincular Profesional
   const handleUnlinkProfessional = async (profId: string) => {
       if(!window.confirm("¿Seguro que deseas cortar el enlace con este especialista?")) return;
       try {
           const userRef = doc(db, 'patients', user.uid);
+          
           await updateDoc(userRef, {
             [`careTeam.${profId}.active`]: false
           });
+
+          setPatientData((prev: any) => {
+              const newCareTeam = { ...prev.careTeam };
+              if(newCareTeam[profId]) newCareTeam[profId].active = false;
+              return { ...prev, careTeam: newCareTeam };
+          });
+          
+          alert("Enlace neural cortado correctamente.");
       } catch (e) {
           console.error(e);
           alert("Error al desvincular. Verifica tu conexión.");
@@ -257,107 +213,55 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 pb-20 font-sans selection:bg-cyan-500/30">
       
-      {/* --- OVERLAY CINEMÁTICO DE NOTIFICACIÓN --- */}
-      {overlayImage && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
-           <img 
-             src={`/assets/${overlayImage}`} 
-             alt="Alerta del Sistema" 
-             className="max-w-md w-full px-4 animate-pulse-slow drop-shadow-[0_0_30px_rgba(6,182,212,0.5)] rounded-xl object-contain" 
-           />
-        </div>
-      )}
-
-      {/* --- HEADER & NEXUS PROGRESS --- */}
-      <section className="relative z-30 mb-8 p-4 bg-slate-900/90 border-b border-cyan-500/30 shadow-[0_10px_30px_-10px_rgba(6,182,212,0.2)]">
-        <div className="absolute inset-0 bg-gradient-to-r from-cyan-900/20 to-transparent pointer-events-none"></div>
-
-        <div className="max-w-3xl mx-auto flex items-center gap-6 relative">
-          
-          {/* AVATAR DINÁMICO */}
-          <div className="relative flex-shrink-0 w-20 h-20 md:w-24 md:h-24 rounded-full border-2 border-cyan-400 p-1 shadow-[0_0_15px_rgba(6,182,212,0.4)] bg-slate-800">
-            <div className="w-full h-full rounded-full overflow-hidden relative bg-black">
-              {showAtlasVideo ? (
-                <video 
-                  src="/assets/atlas-greeting.mp4" 
-                  autoPlay 
-                  muted 
-                  playsInline
-                  onEnded={() => setShowAtlasVideo(false)}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <img 
-                  src={`/assets/${getAtlasImage(currentLevel)}`} 
-                  alt="Avatar" 
-                  className="w-full h-full object-cover animate-pulse-slow"
-                />
-              )}
-            </div>
-            <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-slate-900 animate-pulse"></div>
-          </div>
-
-          {/* DATOS DEL PACIENTE Y BARRAS DE ESTADO */}
-          <div className="flex-1 space-y-3">
-            <div className="flex justify-between items-start">
-              <div>
-                <h2 className="text-xl font-black text-white tracking-wide uppercase flex items-center gap-2">
-                  {patientData?.fullName || 'Sujeto 01'}
-                  <span className="text-[10px] bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded border border-cyan-500/50">
-                    NIVEL {currentLevel}
-                  </span>
-                </h2>
-                <span className="text-xs text-slate-400 font-mono tracking-widest uppercase">
-                  Rango: {patientData?.gamification?.title || "INICIADO"}
+      {/* --- HEADER --- */}
+      <header className="sticky top-0 z-30 bg-slate-900/80 backdrop-blur-md border-b border-slate-700 px-4 py-3 flex justify-between items-center">
+        <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-600 to-blue-700 flex items-center justify-center border-2 border-slate-800 shadow-lg relative">
+                <span className="text-lg font-bold text-white uppercase">
+                    {patientData?.fullName ? patientData.fullName[0] : user.email[0]}
                 </span>
-              </div>
-              
-              {/* CONTADORES (ORO Y NEXUS) */}
-              <div className="flex gap-2">
-                <div className="flex items-center gap-1.5 bg-yellow-900/20 border border-yellow-700/50 px-2 py-1 rounded shadow-[0_0_10px_rgba(234,179,8,0.1)]">
-                  <div className="w-3 h-3 rounded-full bg-gradient-to-br from-yellow-300 to-yellow-600 border border-yellow-200"></div>
-                  <span className="font-mono text-xs font-bold text-yellow-400">{currentGold}</span>
-                </div>
-                <div className="flex items-center gap-1.5 bg-emerald-900/20 border border-emerald-500/50 px-2 py-1 rounded shadow-[0_0_10px_rgba(16,185,129,0.1)]">
-                  <span className="text-xs">💎</span>
-                  <span className="font-mono text-xs font-bold text-emerald-400">{currentNexus}</span>
-                </div>
-              </div>
+                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border border-slate-900"></div>
             </div>
-
-            {/* BARRA DE SINCRONIZACIÓN (XP) */}
-            <div className="relative">
-              <div className="flex justify-between text-[10px] font-mono mb-1 text-cyan-500">
-                <span>SINCRONIZACIÓN NEXUS</span>
-                <span>{Math.floor(xpProgress)}% / Siguiente Nivel</span>
-              </div>
-              
-              <div className="h-4 bg-slate-950 rounded-sm border border-slate-700 relative overflow-hidden">
-                <div className="absolute inset-0 opacity-20 bg-[repeating-linear-gradient(45deg,transparent,transparent_2px,#fff_2px,#fff_4px)]"></div>
-                
-                <div 
-                    className="h-full bg-cyan-500 relative transition-all duration-1000 ease-out shadow-[0_0_10px_#06b6d4]"
-                    style={{ width: `${xpProgress}%` }}
-                >
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent to-white/40"></div>
-                    <div className="absolute right-0 top-0 bottom-0 w-1 bg-white animate-pulse"></div>
-                </div>
-              </div>
+            <div>
+                <h2 className="text-sm font-bold text-white leading-none">
+                    {patientData?.fullName || 'Sujeto 01'}
+                </h2>
+                <span className="text-[10px] text-cyan-400 font-mono tracking-wider">ESTADO: ONLINE</span>
             </div>
-          </div>
-          
-          <button 
-              onClick={() => auth.signOut()} 
-              className="absolute top-0 right-0 md:relative p-2 text-slate-500 hover:text-red-400 transition-colors"
-              title="Desconectar Nexus"
-          >
-              <AtlasIcons.Lock size={20} />
-          </button>
-
         </div>
-      </section>
+        <button 
+            onClick={() => auth.signOut()} 
+            className="p-2 rounded-lg hover:bg-red-900/20 text-slate-500 hover:text-red-400 transition-colors"
+            title="Desconectar"
+        >
+            <AtlasIcons.Lock size={18} />
+        </button>
+      </header>
 
       <main className="max-w-3xl mx-auto p-4 space-y-6">
+
+        {/* --- SECCIÓN 1: PROGRESO --- */}
+        <section className="relative mt-2">
+            <div className="flex justify-between items-end mb-2">
+                <div>
+                    <span className="text-xs text-slate-400 uppercase tracking-widest">Nivel de Sincronización</span>
+                    <div className="text-3xl font-black text-white flex items-baseline gap-1">
+                        {currentLevel} <span className="text-sm text-slate-500 font-normal">/ {patientData?.gamification?.title || "INICIADO"}</span>
+                    </div>
+                </div>
+                <div className="text-right">
+                    <span className="text-xs text-cyan-400 font-mono">XP: {Math.floor(xpProgress)}%</span>
+                </div>
+            </div>
+            <div className="h-4 bg-slate-800 rounded-full overflow-hidden border border-slate-700 relative shadow-inner">
+                <div 
+                    className="h-full bg-gradient-to-r from-cyan-600 to-blue-500 transition-all duration-1000 ease-out relative"
+                    style={{ width: `${xpProgress}%` }}
+                >
+                    <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                </div>
+            </div>
+        </section>
 
         {/* --- SECCIÓN 2: HUD STATS --- */}
         <div className="grid grid-cols-3 gap-3">
@@ -413,7 +317,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
                 {todaysTasks.map((task) => {
                     let isCompletedToday = false;
                     if (task.lastCompletedAt) {
-                        const lastDate = task.lastCompletedAt.toDate ? task.lastCompletedAt.toDate() : new Date(task.lastCompletedAt);
+                        const lastDate = task.lastCompletedAt.toDate ? task.lastCompletedAt.toDate() : task.lastCompletedAt;
                         isCompletedToday = isSameDay(lastDate, new Date());
                     }
 
