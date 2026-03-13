@@ -53,16 +53,16 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
   const [rating, setRating] = useState(5);
   const [submittingTask, setSubmittingTask] = useState(false);
 
-  // Sistema Cinemático y Avatar
+  // Sistema Cinemático, Avatar y Notificaciones
   const [showAtlasVideo, setShowAtlasVideo] = useState(false);
   const [overlayImage, setOverlayImage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // ---------------------------------------------------------------------------
   // 2. EFECTOS Y TIEMPO REAL
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
-    // Si tienes video, alternarlo cada 60 segundos
     if (NEXUS_ASSETS.atlasVideo) {
       const interval = setInterval(() => {
         setShowAtlasVideo(true);
@@ -75,7 +75,14 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
     setOverlayImage(imageUrl);
     setTimeout(() => {
       setOverlayImage(null);
-    }, 2000); // 2 segundos exactos
+    }, 2000); 
+  };
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000); // La notificación sutil dura 4 segundos
   };
 
   useEffect(() => {
@@ -96,9 +103,10 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         const id = change.doc.id;
 
         if (change.type === 'added') {
+          // Si es nueva, solo mostramos la notificación sutil
           if (!data.notifiedAssigned) {
-            const imgToDisplay = type === 'routine' ? NEXUS_ASSETS.protocoloIniciado : NEXUS_ASSETS.misionAsignada;
-            triggerOverlay(imgToDisplay);
+            const msg = type === 'routine' ? 'Nuevos protocolos asignados' : 'Nueva misión asignada';
+            showToast(msg);
             updateDoc(change.doc.ref, { notifiedAssigned: true }).catch(console.error);
           }
           
@@ -176,6 +184,31 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
   const todaysTasks = getTodaysTasks();
 
+  // NUEVO: Interceptor de clics para mostrar el arte la primera vez
+  const handleTaskClick = async (task: any) => {
+    if (!task.hasSeenArt) {
+      // 1. Mostrar la imagen correspondiente
+      const imgToDisplay = task.type === 'routine' ? NEXUS_ASSETS.protocoloIniciado : NEXUS_ASSETS.misionAsignada;
+      triggerOverlay(imgToDisplay);
+      
+      // 2. Marcar en la BD que ya vio el arte
+      const collectionName = task.type === 'routine' ? 'assigned_routines' : 'assigned_missions';
+      try {
+        await updateDoc(doc(db, collectionName, task.id), { hasSeenArt: true });
+      } catch (error) {
+        console.error("Error actualizando vista de arte:", error);
+      }
+
+      // 3. Abrir el modal después de 2 segundos (cuando desaparece la imagen)
+      setTimeout(() => {
+        setSelectedTask(task);
+      }, 2000);
+    } else {
+      // Si ya la había visto antes, abrir el modal directo
+      setSelectedTask(task);
+    }
+  };
+
   const handleCompleteTask = async () => {
     if (!selectedTask || !user) return;
     setSubmittingTask(true);
@@ -204,6 +237,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         lastCompletedAt: serverTimestamp()
       };
 
+      // Las imágenes de victoria se mantienen al momento de "Completar"
       if (selectedTask.type === 'routine') {
         if (percent >= 80 && !selectedTask.notified80) {
            triggerOverlay(NEXUS_ASSETS.protocoloCompletado);
@@ -263,13 +297,23 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 pb-20 font-sans selection:bg-cyan-500/30">
       
-      {/* --- OVERLAY CINEMÁTICO DE NOTIFICACIÓN --- */}
+      {/* --- NOTIFICACIÓN SUTIL (TOAST) --- */}
+      {toastMessage && (
+        <div className="fixed top-20 right-4 md:right-10 z-[9999] bg-slate-900/95 border border-cyan-500 text-cyan-400 px-5 py-3 rounded-lg shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center gap-3 animate-in slide-in-from-right fade-in duration-300">
+          <div className="bg-cyan-900/50 p-1.5 rounded-full">
+            <AtlasIcons.Zap size={16} className="animate-pulse" />
+          </div>
+          <span className="font-bold text-sm tracking-wide uppercase">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* --- OVERLAY CINEMÁTICO DE ARTE --- */}
       {overlayImage && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-md animate-in fade-in zoom-in duration-300">
            <img 
              src={overlayImage} 
-             alt="Alerta del Sistema" 
-             className="max-w-md w-full px-4 animate-pulse-slow drop-shadow-[0_0_30px_rgba(6,182,212,0.5)] rounded-xl object-contain" 
+             alt="Arte de Misión" 
+             className="max-w-md w-full px-4 drop-shadow-[0_0_40px_rgba(6,182,212,0.3)] rounded-xl object-contain transition-transform transform scale-100" 
            />
         </div>
       )}
@@ -430,7 +474,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
                     return (
                         <div 
                             key={task.id} 
-                            onClick={() => !isCompletedToday && setSelectedTask(task)}
+                            onClick={() => !isCompletedToday && handleTaskClick(task)}
                             className={`
                                 relative overflow-hidden group transition-all duration-300
                                 border rounded-xl p-4 flex items-center gap-4
@@ -454,7 +498,9 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
                                 <h4 className={`font-bold transition-colors ${isCompletedToday ? 'text-slate-500 line-through' : 'text-slate-200 group-hover:text-white'}`}>
                                     {title}
                                 </h4>
-                                <span className="text-xs text-slate-500 font-mono uppercase">{type}</span>
+                                <span className="text-xs text-slate-500 font-mono uppercase">
+                                  {type} {task.hasSeenArt ? '' : '• NUEVO'}
+                                </span>
                             </div>
 
                             <div className={`text-xs font-bold font-mono px-2 py-1 rounded border ${
