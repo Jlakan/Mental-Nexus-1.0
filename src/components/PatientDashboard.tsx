@@ -12,9 +12,12 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { db, auth } from '../services/firebase';
+import { AtlasCard, AtlasButton, AtlasIcons } from './design/AtlasDesignSystem';
+
+// --- NUEVOS MÓDULOS IMPORTADOS ---
 import PatientDiary from './PatientDiary';
 import EmotionalHistoryChart from './EmotionalHistoryChart';
-import { AtlasCard, AtlasButton, AtlasIcons } from './design/AtlasDesignSystem';
+import NextAppointments from './NextAppointments';
 
 // --- DICCIONARIO DE ASSETS (FIREBASE STORAGE) ---
 const NEXUS_ASSETS = {
@@ -57,7 +60,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
   // Sistema Cinemático, Avatar y Notificaciones
   const [showAtlasVideo, setShowAtlasVideo] = useState(false);
-  const [showAtlasModal, setShowAtlasModal] = useState(false); // NUEVO: Estado para el modal del video con sonido
+  const [showAtlasModal, setShowAtlasModal] = useState(false);
   const [overlayImage, setOverlayImage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [pendingTaskToOpen, setPendingTaskToOpen] = useState<any>(null);
@@ -68,7 +71,6 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
   useEffect(() => {
     if (NEXUS_ASSETS.atlasVideo) {
-      // Temporizador ajustado a 80 segundos (80000 ms)
       const interval = setInterval(() => {
         setShowAtlasVideo(true);
       }, 80000); 
@@ -81,7 +83,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
     setPendingTaskToOpen(null);
     setTimeout(() => {
       setOverlayImage(current => current === imageUrl ? null : current);
-    }, 10000); // 10 segundos
+    }, 10000); 
   };
 
   const showToast = (message: string) => {
@@ -219,7 +221,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
           }
           return current;
         });
-      }, 10000); // Auto-cierre después de 10 segundos
+      }, 10000); 
     } else {
       setSelectedTask(task);
     }
@@ -374,7 +376,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
       <section className="relative z-30 mb-8 p-4 bg-slate-900/90 border-b border-cyan-500/30 shadow-[0_10px_30px_-10px_rgba(6,182,212,0.2)]">
         <div className="absolute inset-0 bg-gradient-to-r from-cyan-900/20 to-transparent pointer-events-none"></div>
 
-        <div className="max-w-3xl mx-auto flex items-center gap-6 relative">
+        <div className="max-w-7xl mx-auto flex items-center gap-6 relative">
           
           {/* AVATAR DINÁMICO E INTERACTIVO */}
           <div 
@@ -463,180 +465,190 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         </div>
       </section>
 
-      <main className="max-w-3xl mx-auto p-4 space-y-6">
+      {/* --- GRID PRINCIPAL (DISEÑO DE COLUMNAS PARA ESCRITORIO) --- */}
+      <main className="max-w-7xl mx-auto p-4 grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
 
-        {/* --- SECCIÓN 2: HUD STATS --- */}
-        <div className="grid grid-cols-3 gap-3">
-            <AtlasCard noPadding className="bg-slate-800/50 border-t-2 border-t-transparent hover:border-t-purple-500 transition-all">
-                <div className="p-3 text-center flex flex-col items-center gap-2">
-                    <div className="p-2 rounded-lg bg-slate-900 text-purple-400"><AtlasIcons.Brain /></div>
-                    <div>
-                        <div className="text-xl font-bold text-white">{uiStats.psique}</div>
-                        <div className="text-[9px] text-slate-500 font-mono uppercase">PSIQUE</div>
-                    </div>
-                </div>
-            </AtlasCard>
-            <AtlasCard noPadding className="bg-slate-800/50 border-t-2 border-t-transparent hover:border-t-red-500 transition-all">
-                <div className="p-3 text-center flex flex-col items-center gap-2">
-                    <div className="p-2 rounded-lg bg-slate-900 text-red-400"><AtlasIcons.Heart /></div>
-                    <div>
-                        <div className="text-xl font-bold text-white">{uiStats.vitalidad}</div>
-                        <div className="text-[9px] text-slate-500 font-mono uppercase">VITALIDAD</div>
-                    </div>
-                </div>
-            </AtlasCard>
-            <AtlasCard noPadding className="bg-slate-800/50 border-t-2 border-t-transparent hover:border-t-blue-500 transition-all">
-                <div className="p-3 text-center flex flex-col items-center gap-2">
-                    <div className="p-2 rounded-lg bg-slate-900 text-blue-400"><AtlasIcons.Shield /></div>
-                    <div>
-                        <div className="text-xl font-bold text-white">{uiStats.resiliencia}</div>
-                        <div className="text-[9px] text-slate-500 font-mono uppercase">RESILIENCIA</div>
-                    </div>
-                </div>
-            </AtlasCard>
+        {/* --- COLUMNA IZQUIERDA (GRÁFICA Y CITAS) --- */}
+        <div className="xl:col-span-3 space-y-6">
+            <EmotionalHistoryChart />
+            <NextAppointments careTeam={patientData?.careTeam} />
         </div>
 
-        {/* --- SECCIÓN 3: MISIONES DEL DÍA --- */}
-        <section>
-            <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <AtlasIcons.Target className="text-cyan-500" />
-                    PROTOCOLOS ACTIVOS
-                </h3>
-                <span className="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-cyan-400 border border-slate-700">
-                    HOY: {new Date().toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' })}
-                </span>
-            </div>
-
-            <div className="space-y-3">
-                {todaysTasks.length === 0 && (
-                    <div className="text-center py-10 text-slate-500 border border-dashed border-slate-700 rounded-xl bg-slate-800/30">
-                        <p>No hay misiones asignadas para hoy.</p>
-                        <p className="text-xs mt-1">Recarga tu energía para mañana.</p>
-                    </div>
-                )}
-
-                {todaysTasks.map((task) => {
-                    let isCompletedToday = false;
-                    if (task.lastCompletedAt) {
-                        const lastDate = task.lastCompletedAt.toDate ? task.lastCompletedAt.toDate() : new Date(task.lastCompletedAt);
-                        isCompletedToday = isSameDay(lastDate, new Date());
-                    }
-
-                    const title = task.staticTaskData?.title || task.title || "Misión Desconocida";
-                    const xpVal = task.rewards?.xp || task.staticTaskData?.xp || 10;
-                    const type = task.type === 'routine' ? 'Rutina' : 'Reto';
-
-                    return (
-                        <div 
-                            key={task.id} 
-                            onClick={() => !isCompletedToday && handleTaskClick(task)}
-                            className={`
-                                relative overflow-hidden group transition-all duration-300
-                                border rounded-xl p-4 flex items-center gap-4
-                                ${isCompletedToday 
-                                    ? 'bg-slate-900/40 border-slate-800 opacity-60 grayscale cursor-default' 
-                                    : 'bg-slate-800 border-slate-600 cursor-pointer hover:border-cyan-500 hover:shadow-[0_0_15px_rgba(6,182,212,0.1)] hover:-translate-y-1'
-                                }
-                            `}
-                        >
-                            <div className={`
-                                w-10 h-10 rounded-full flex items-center justify-center border transition-colors
-                                ${isCompletedToday 
-                                    ? 'bg-green-900/20 border-green-600 text-green-500' 
-                                    : 'bg-slate-900 border-slate-700 text-cyan-500 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-400'
-                                }
-                            `}>
-                                {isCompletedToday ? <AtlasIcons.Check size={20} /> : <AtlasIcons.Zap size={20} />}
-                            </div>
-
-                            <div className="flex-1">
-                                <h4 className={`font-bold transition-colors ${isCompletedToday ? 'text-slate-500 line-through' : 'text-slate-200 group-hover:text-white'}`}>
-                                    {title}
-                                </h4>
-                                <span className="text-xs text-slate-500 font-mono uppercase">
-                                  {type} {task.hasSeenArt ? '' : '• NUEVO'}
-                                </span>
-                            </div>
-
-                            <div className={`text-xs font-bold font-mono px-2 py-1 rounded border ${
-                                isCompletedToday 
-                                ? 'text-slate-600 border-transparent' 
-                                : 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20'
-                            }`}>
-                                +{xpVal} XP
-                            </div>
+        {/* --- COLUMNA CENTRAL (NÚCLEO Y GAMIFICACIÓN) --- */}
+        <div className="xl:col-span-5 space-y-6">
+            
+            {/* HUD STATS */}
+            <div className="grid grid-cols-3 gap-3">
+                <AtlasCard noPadding className="bg-slate-800/50 border-t-2 border-t-transparent hover:border-t-purple-500 transition-all">
+                    <div className="p-3 text-center flex flex-col items-center gap-2">
+                        <div className="p-2 rounded-lg bg-slate-900 text-purple-400"><AtlasIcons.Brain /></div>
+                        <div>
+                            <div className="text-xl font-bold text-white">{uiStats.psique}</div>
+                            <div className="text-[9px] text-slate-500 font-mono uppercase">PSIQUE</div>
                         </div>
-                    );
-                })}
+                    </div>
+                </AtlasCard>
+                <AtlasCard noPadding className="bg-slate-800/50 border-t-2 border-t-transparent hover:border-t-red-500 transition-all">
+                    <div className="p-3 text-center flex flex-col items-center gap-2">
+                        <div className="p-2 rounded-lg bg-slate-900 text-red-400"><AtlasIcons.Heart /></div>
+                        <div>
+                            <div className="text-xl font-bold text-white">{uiStats.vitalidad}</div>
+                            <div className="text-[9px] text-slate-500 font-mono uppercase">VITALIDAD</div>
+                        </div>
+                    </div>
+                </AtlasCard>
+                <AtlasCard noPadding className="bg-slate-800/50 border-t-2 border-t-transparent hover:border-t-blue-500 transition-all">
+                    <div className="p-3 text-center flex flex-col items-center gap-2">
+                        <div className="p-2 rounded-lg bg-slate-900 text-blue-400"><AtlasIcons.Shield /></div>
+                        <div>
+                            <div className="text-xl font-bold text-white">{uiStats.resiliencia}</div>
+                            <div className="text-[9px] text-slate-500 font-mono uppercase">RESILIENCIA</div>
+                        </div>
+                    </div>
+                </AtlasCard>
             </div>
-        </section>
 
-        {/* --- SECCIÓN 4: ALIADOS --- */}
-        <section>
-            <h3 className="text-sm text-slate-400 font-mono uppercase mb-3 mt-8 tracking-widest border-b border-slate-800 pb-2">
-                Red de Soporte
-            </h3>
-            {(!patientData?.careTeam || Object.values(patientData.careTeam).filter((pro: any) => pro.active).length === 0) ? (
-                <p className="text-sm text-slate-600 italic">No tienes especialistas vinculados.</p>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {Object.values(patientData.careTeam)
-                        .filter((pro: any) => pro.active)
-                        .map((pro: any) => (
-                        <AtlasCard key={pro.professionalId} className="flex items-center gap-4 border-slate-700 bg-slate-800/50">
-                            <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-xl">
-                                👨‍⚕️
-                            </div>
-                            <div className="flex-1 overflow-hidden">
-                                <h4 className="font-bold text-white text-sm truncate">
-                                    {pro.professionalName || 'Especialista'}
-                                </h4>
-                                <p className="text-xs text-slate-500 capitalize truncate">
-                                    {pro.professionType || 'Salud Mental'}
-                                </p>
-                            </div>
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); handleUnlinkProfessional(pro.professionalId); }}
-                                className="text-red-400 hover:text-white hover:bg-red-600 text-[10px] uppercase border border-red-900/50 bg-red-900/10 px-2 py-1 rounded transition-all"
-                            >
-                                Desvincular
-                            </button>
-                        </AtlasCard>
+            {/* CHECK EMOCIONAL RÁPIDO */}
+            <AtlasCard className="border-cyan-900/30 bg-gradient-to-b from-slate-800 to-slate-900">
+                <h3 className="text-sm text-slate-400 font-mono uppercase mb-4 text-center tracking-widest">
+                    Check-in Emocional
+                </h3>
+                <div className="flex justify-between px-4 sm:px-10">
+                    {['😫', '😕', '😐', '🙂', '🤩'].map((emoji, i) => (
+                        <button 
+                            key={i} 
+                            className="text-2xl md:text-3xl hover:scale-125 transition-transform p-2 grayscale hover:grayscale-0 cursor-pointer"
+                            onClick={() => alert("Registro emocional guardado (Simulación)")}
+                        >
+                            {emoji}
+                        </button>
                     ))}
                 </div>
-            )}
-        </section>
-        
-        {/* --- SECCIÓN 5: CHECK EMOCIONAL RÁPIDO --- */}
-       {/* --- SECCIÓN 5: CHECK EMOCIONAL RÁPIDO --- */}
-       <AtlasCard className="mt-8 border-cyan-900/30 bg-gradient-to-b from-slate-800 to-slate-900">
-            <h3 className="text-sm text-slate-400 font-mono uppercase mb-4 text-center tracking-widest">
-                Check-in Emocional
-            </h3>
-            <div className="flex justify-between px-4 sm:px-10">
-                {['😫', '😕', '😐', '🙂', '🤩'].map((emoji, i) => (
-                    <button 
-                        key={i} 
-                        className="text-2xl md:text-3xl hover:scale-125 transition-transform p-2 grayscale hover:grayscale-0 cursor-pointer"
-                        onClick={() => alert("Registro emocional guardado (Simulación)")}
-                    >
-                        {emoji}
-                    </button>
-                ))}
-            </div>
-        </AtlasCard>
+            </AtlasCard>
 
-       {/* --- SECCIÓN 6: BITÁCORA DEL PACIENTE --- */}
-       <PatientDiary 
-           patientId={user.uid} 
-           careTeam={patientData?.careTeam} 
-        />
+            {/* MISIONES DEL DÍA */}
+            <section>
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <AtlasIcons.Target className="text-cyan-500" />
+                        PROTOCOLOS ACTIVOS
+                    </h3>
+                    <span className="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-cyan-400 border border-slate-700">
+                        HOY: {new Date().toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' })}
+                    </span>
+                </div>
 
-        {/* --- SECCIÓN 7: MÉTRICAS NEURALES --- */}
-        <EmotionalHistoryChart />
+                <div className="space-y-3">
+                    {todaysTasks.length === 0 && (
+                        <div className="text-center py-10 text-slate-500 border border-dashed border-slate-700 rounded-xl bg-slate-800/30">
+                            <p>No hay misiones asignadas para hoy.</p>
+                            <p className="text-xs mt-1">Recarga tu energía para mañana.</p>
+                        </div>
+                    )}
+
+                    {todaysTasks.map((task) => {
+                        let isCompletedToday = false;
+                        if (task.lastCompletedAt) {
+                            const lastDate = task.lastCompletedAt.toDate ? task.lastCompletedAt.toDate() : new Date(task.lastCompletedAt);
+                            isCompletedToday = isSameDay(lastDate, new Date());
+                        }
+
+                        const title = task.staticTaskData?.title || task.title || "Misión Desconocida";
+                        const xpVal = task.rewards?.xp || task.staticTaskData?.xp || 10;
+                        const type = task.type === 'routine' ? 'Rutina' : 'Reto';
+
+                        return (
+                            <div 
+                                key={task.id} 
+                                onClick={() => !isCompletedToday && handleTaskClick(task)}
+                                className={`
+                                    relative overflow-hidden group transition-all duration-300
+                                    border rounded-xl p-4 flex items-center gap-4
+                                    ${isCompletedToday 
+                                        ? 'bg-slate-900/40 border-slate-800 opacity-60 grayscale cursor-default' 
+                                        : 'bg-slate-800 border-slate-600 cursor-pointer hover:border-cyan-500 hover:shadow-[0_0_15px_rgba(6,182,212,0.1)] hover:-translate-y-1'
+                                    }
+                                `}
+                            >
+                                <div className={`
+                                    w-10 h-10 rounded-full flex items-center justify-center border transition-colors
+                                    ${isCompletedToday 
+                                        ? 'bg-green-900/20 border-green-600 text-green-500' 
+                                        : 'bg-slate-900 border-slate-700 text-cyan-500 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-400'
+                                    }
+                                `}>
+                                    {isCompletedToday ? <AtlasIcons.Check size={20} /> : <AtlasIcons.Zap size={20} />}
+                                </div>
+
+                                <div className="flex-1">
+                                    <h4 className={`font-bold transition-colors ${isCompletedToday ? 'text-slate-500 line-through' : 'text-slate-200 group-hover:text-white'}`}>
+                                        {title}
+                                    </h4>
+                                    <span className="text-xs text-slate-500 font-mono uppercase">
+                                      {type} {task.hasSeenArt ? '' : '• NUEVO'}
+                                    </span>
+                                </div>
+
+                                <div className={`text-xs font-bold font-mono px-2 py-1 rounded border ${
+                                    isCompletedToday 
+                                    ? 'text-slate-600 border-transparent' 
+                                    : 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20'
+                                }`}>
+                                    +{xpVal} XP
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </section>
+        </div>
+
+        {/* --- COLUMNA DERECHA (DIARIO Y RED DE SOPORTE) --- */}
+        <div className="xl:col-span-4 space-y-6">
+            
+            <PatientDiary 
+               patientId={user.uid} 
+               careTeam={patientData?.careTeam} 
+            />
+
+            <section>
+                <h3 className="text-sm text-slate-400 font-mono uppercase mb-3 mt-4 tracking-widest border-b border-slate-800 pb-2">
+                    Red de Soporte
+                </h3>
+                {(!patientData?.careTeam || Object.values(patientData.careTeam).filter((pro: any) => pro.active).length === 0) ? (
+                    <p className="text-sm text-slate-600 italic">No tienes especialistas vinculados.</p>
+                ) : (
+                    <div className="grid grid-cols-1 gap-4">
+                        {Object.values(patientData.careTeam)
+                            .filter((pro: any) => pro.active)
+                            .map((pro: any) => (
+                            <AtlasCard key={pro.professionalId} className="flex items-center gap-4 border-slate-700 bg-slate-800/50">
+                                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-xl">
+                                    👨‍⚕️
+                                </div>
+                                <div className="flex-1 overflow-hidden">
+                                    <h4 className="font-bold text-white text-sm truncate">
+                                        {pro.professionalName || 'Especialista'}
+                                    </h4>
+                                    <p className="text-xs text-slate-500 capitalize truncate">
+                                        {pro.professionType || 'Salud Mental'}
+                                    </p>
+                                </div>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); handleUnlinkProfessional(pro.professionalId); }}
+                                    className="text-red-400 hover:text-white hover:bg-red-600 text-[10px] uppercase border border-red-900/50 bg-red-900/10 px-2 py-1 rounded transition-all"
+                                >
+                                    Desvincular
+                                </button>
+                            </AtlasCard>
+                        ))}
+                    </div>
+                )}
+            </section>
+        </div>
 
       </main>
+
       {/* --- MODAL DE VALIDACIÓN DE TAREA --- */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
