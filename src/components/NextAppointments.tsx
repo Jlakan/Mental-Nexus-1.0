@@ -14,7 +14,7 @@ export default function NextAppointments({ careTeam }: NextAppointmentsProps) {
 
   // Ordenamos por fecha de cita (Si no hay fecha, se van al final)
   // Nota: Asumimos que en el futuro agregarás un campo "nextAppointment" a la BD
-  const sortedTeam = [...activeCareTeam].sort((a, b) => {
+  const sortedTeam = [...activeCareTeam].sort((a: any, b: any) => {
     if (!a.nextAppointment) return 1;
     if (!b.nextAppointment) return -1;
     return new Date(a.nextAppointment).getTime() - new Date(b.nextAppointment).getTime();
