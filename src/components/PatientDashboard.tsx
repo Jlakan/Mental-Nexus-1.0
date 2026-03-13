@@ -57,6 +57,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
   const [showAtlasVideo, setShowAtlasVideo] = useState(false);
   const [overlayImage, setOverlayImage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [pendingTaskToOpen, setPendingTaskToOpen] = useState<any>(null); // Nuevo estado para controlar qué misión se abre al cerrar la imagen
 
   // ---------------------------------------------------------------------------
   // 2. EFECTOS Y TIEMPO REAL
@@ -73,16 +74,25 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
   const triggerOverlay = (imageUrl: string) => {
     setOverlayImage(imageUrl);
+    setPendingTaskToOpen(null);
     setTimeout(() => {
-      setOverlayImage(null);
-    }, 2000); 
+      setOverlayImage(current => current === imageUrl ? null : current);
+    }, 10000); // 10 segundos
   };
 
   const showToast = (message: string) => {
     setToastMessage(message);
     setTimeout(() => {
       setToastMessage(null);
-    }, 4000); // La notificación sutil dura 4 segundos
+    }, 4000);
+  };
+
+  const handleCloseOverlay = () => {
+    setOverlayImage(null);
+    if (pendingTaskToOpen) {
+      setSelectedTask(pendingTaskToOpen);
+      setPendingTaskToOpen(null);
+    }
   };
 
   useEffect(() => {
@@ -103,7 +113,6 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         const id = change.doc.id;
 
         if (change.type === 'added') {
-          // Si es nueva, solo mostramos la notificación sutil
           if (!data.notifiedAssigned) {
             const msg = type === 'routine' ? 'Nuevos protocolos asignados' : 'Nueva misión asignada';
             showToast(msg);
@@ -184,14 +193,12 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
   const todaysTasks = getTodaysTasks();
 
-  // NUEVO: Interceptor de clics para mostrar el arte la primera vez
   const handleTaskClick = async (task: any) => {
     if (!task.hasSeenArt) {
-      // 1. Mostrar la imagen correspondiente
       const imgToDisplay = task.type === 'routine' ? NEXUS_ASSETS.protocoloIniciado : NEXUS_ASSETS.misionAsignada;
-      triggerOverlay(imgToDisplay);
-      
-      // 2. Marcar en la BD que ya vio el arte
+      setOverlayImage(imgToDisplay);
+      setPendingTaskToOpen(task);
+
       const collectionName = task.type === 'routine' ? 'assigned_routines' : 'assigned_missions';
       try {
         await updateDoc(doc(db, collectionName, task.id), { hasSeenArt: true });
@@ -199,12 +206,17 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         console.error("Error actualizando vista de arte:", error);
       }
 
-      // 3. Abrir el modal después de 2 segundos (cuando desaparece la imagen)
       setTimeout(() => {
-        setSelectedTask(task);
-      }, 2000);
+        setOverlayImage((current) => {
+          if (current) {
+            setSelectedTask(task);
+            setPendingTaskToOpen(null);
+            return null;
+          }
+          return current;
+        });
+      }, 10000); // Auto-cierre después de 10 segundos
     } else {
-      // Si ya la había visto antes, abrir el modal directo
       setSelectedTask(task);
     }
   };
@@ -237,7 +249,6 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         lastCompletedAt: serverTimestamp()
       };
 
-      // Las imágenes de victoria se mantienen al momento de "Completar"
       if (selectedTask.type === 'routine') {
         if (percent >= 80 && !selectedTask.notified80) {
            triggerOverlay(NEXUS_ASSETS.protocoloCompletado);
@@ -307,14 +318,20 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         </div>
       )}
 
-      {/* --- OVERLAY CINEMÁTICO DE ARTE --- */}
+      {/* --- OVERLAY CINEMÁTICO DE ARTE (PANTALLA COMPLETA) --- */}
       {overlayImage && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-md animate-in fade-in zoom-in duration-300">
+        <div 
+          className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/95 backdrop-blur-md animate-in fade-in zoom-in duration-300 cursor-pointer"
+          onClick={handleCloseOverlay}
+        >
            <img 
              src={overlayImage} 
              alt="Arte de Misión" 
-             className="max-w-md w-full px-4 drop-shadow-[0_0_40px_rgba(6,182,212,0.3)] rounded-xl object-contain transition-transform transform scale-100" 
+             className="w-full h-full p-4 md:p-12 object-contain drop-shadow-[0_0_50px_rgba(6,182,212,0.4)] transition-transform transform scale-100" 
            />
+           <div className="absolute bottom-8 text-cyan-500 text-xs md:text-sm font-mono tracking-widest animate-pulse bg-slate-900/50 px-4 py-2 rounded-full border border-cyan-500/30">
+              [ CLIC PARA CONTINUAR ]
+           </div>
         </div>
       )}
 
