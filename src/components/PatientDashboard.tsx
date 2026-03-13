@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../services/firebase';
 import PatientDiary from './PatientDiary';
+import EmotionalHistoryChart from './EmotionalHistoryChart';
 import { AtlasCard, AtlasButton, AtlasIcons } from './design/AtlasDesignSystem';
 
 // --- DICCIONARIO DE ASSETS (FIREBASE STORAGE) ---
@@ -626,14 +627,16 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
             </div>
         </AtlasCard>
 
-        {/* --- SECCIÓN 6: BITÁCORA DEL PACIENTE (NUEVO) --- */}
-        <PatientDiary 
+       {/* --- SECCIÓN 6: BITÁCORA DEL PACIENTE --- */}
+       <PatientDiary 
            patientId={user.uid} 
            careTeam={patientData?.careTeam} 
         />
 
-      </main>
+        {/* --- SECCIÓN 7: MÉTRICAS NEURALES --- */}
+        <EmotionalHistoryChart />
 
+      </main>
       {/* --- MODAL DE VALIDACIÓN DE TAREA --- */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
