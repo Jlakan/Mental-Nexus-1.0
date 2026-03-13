@@ -24,7 +24,7 @@ const NEXUS_ASSETS = {
   atlas2: "https://firebasestorage.googleapis.com/v0/b/mental-nexus-ac4c6.firebasestorage.app/o/atlas_2.jpg?alt=media&token=54340bcb-4775-4282-9b1c-14ccc9c586e7",
   atlas3: "https://firebasestorage.googleapis.com/v0/b/mental-nexus-ac4c6.firebasestorage.app/o/atlas_3.jpg?alt=media&token=ade68626-9a61-4a18-9b48-e00480c289ec",
   atlas4: "https://firebasestorage.googleapis.com/v0/b/mental-nexus-ac4c6.firebasestorage.app/o/atlas_4.jpg?alt=media&token=e92af5f4-a586-4bec-9025-98c643d4cd1d",
-  atlasVideo: "" // Pega aquí el enlace de tu video MP4 cuando lo subas a Firebase
+  atlasVideo: "https://firebasestorage.googleapis.com/v0/b/mental-nexus-ac4c6.firebasestorage.app/o/Animacio%CC%81n%20Atlas%20Vance%20primera%20etapa.mp4?alt=media&token=8bbfd688-a3c5-4be0-a71b-bec7898b26da"
 };
 
 // --- INTERFACES ---
@@ -55,9 +55,10 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
   // Sistema Cinemático, Avatar y Notificaciones
   const [showAtlasVideo, setShowAtlasVideo] = useState(false);
+  const [showAtlasModal, setShowAtlasModal] = useState(false); // NUEVO: Estado para el modal del video con sonido
   const [overlayImage, setOverlayImage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [pendingTaskToOpen, setPendingTaskToOpen] = useState<any>(null); // Nuevo estado para controlar qué misión se abre al cerrar la imagen
+  const [pendingTaskToOpen, setPendingTaskToOpen] = useState<any>(null);
 
   // ---------------------------------------------------------------------------
   // 2. EFECTOS Y TIEMPO REAL
@@ -65,9 +66,10 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
   useEffect(() => {
     if (NEXUS_ASSETS.atlasVideo) {
+      // Temporizador ajustado a 80 segundos (80000 ms)
       const interval = setInterval(() => {
         setShowAtlasVideo(true);
-      }, 60000); 
+      }, 80000); 
       return () => clearInterval(interval);
     }
   }, []);
@@ -335,15 +337,50 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         </div>
       )}
 
+      {/* --- MODAL DEL AVATAR CON SONIDO --- */}
+      {showAtlasModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in zoom-in duration-200">
+          <div className="relative w-full max-w-md md:max-w-2xl bg-slate-900 border border-cyan-500/50 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.4)] overflow-hidden flex flex-col items-center">
+            
+            <div className="w-full bg-slate-800 p-3 border-b border-slate-700 flex justify-between items-center">
+                <h3 className="font-bold text-white flex items-center gap-2">
+                    <AtlasIcons.Zap className="text-cyan-400" />
+                    ENLACE NEURAL: ATLAS VANCE
+                </h3>
+                <button onClick={() => setShowAtlasModal(false)} className="text-slate-400 hover:text-white p-1 hover:bg-slate-700 rounded transition-colors">
+                    <AtlasIcons.Close />
+                </button>
+            </div>
+
+            <div className="w-full bg-black aspect-square md:aspect-video relative flex justify-center items-center">
+               <video 
+                 src={NEXUS_ASSETS.atlasVideo} 
+                 autoPlay 
+                 controls
+                 className="w-full h-full object-contain"
+               />
+            </div>
+            
+            <div className="w-full p-3 text-center bg-slate-900 border-t border-slate-700">
+                <p className="text-cyan-500 text-[10px] font-mono tracking-widest uppercase animate-pulse">Transmisión Activa...</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- HEADER & NEXUS PROGRESS --- */}
       <section className="relative z-30 mb-8 p-4 bg-slate-900/90 border-b border-cyan-500/30 shadow-[0_10px_30px_-10px_rgba(6,182,212,0.2)]">
         <div className="absolute inset-0 bg-gradient-to-r from-cyan-900/20 to-transparent pointer-events-none"></div>
 
         <div className="max-w-3xl mx-auto flex items-center gap-6 relative">
           
-          {/* AVATAR DINÁMICO */}
-          <div className="relative flex-shrink-0 w-20 h-20 md:w-24 md:h-24 rounded-full border-2 border-cyan-400 p-1 shadow-[0_0_15px_rgba(6,182,212,0.4)] bg-slate-800">
-            <div className="w-full h-full rounded-full overflow-hidden relative bg-black">
+          {/* AVATAR DINÁMICO E INTERACTIVO */}
+          <div 
+            onClick={() => setShowAtlasModal(true)}
+            className="relative flex-shrink-0 w-20 h-20 md:w-24 md:h-24 rounded-full border-2 border-cyan-400 p-1 shadow-[0_0_15px_rgba(6,182,212,0.4)] bg-slate-800 cursor-pointer hover:shadow-[0_0_30px_rgba(6,182,212,0.8)] hover:scale-105 hover:border-white transition-all duration-300"
+            title="Abrir enlace neural con Atlas"
+          >
+            <div className="w-full h-full rounded-full overflow-hidden relative bg-black pointer-events-none">
               {showAtlasVideo && NEXUS_ASSETS.atlasVideo ? (
                 <video 
                   src={NEXUS_ASSETS.atlasVideo} 
@@ -589,7 +626,7 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
 
       </main>
 
-      {/* --- MODAL DE VALIDACIÓN --- */}
+      {/* --- MODAL DE VALIDACIÓN DE TAREA --- */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="w-full max-w-md bg-slate-900 border border-cyan-500/50 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.2)] overflow-hidden">
