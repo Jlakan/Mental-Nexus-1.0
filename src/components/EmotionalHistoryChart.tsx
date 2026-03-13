@@ -64,7 +64,7 @@ export default function EmotionalHistoryChart() {
       </div>
 
       <div className="w-full h-64">
-        <ResponsiveContainer w-full h="100%">
+      <ResponsiveContainer width="100%" height="100%">
           <LineChart data={mockData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
             <defs>
               {/* Gradiente para el brillo de la línea */}
