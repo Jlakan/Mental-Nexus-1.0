@@ -12,6 +12,7 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { db, auth } from '../services/firebase';
+import PatientDiary from './PatientDiary';
 import { AtlasCard, AtlasButton, AtlasIcons } from './design/AtlasDesignSystem';
 
 // --- DICCIONARIO DE ASSETS (FIREBASE STORAGE) ---
@@ -607,7 +608,8 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
         </section>
         
         {/* --- SECCIÓN 5: CHECK EMOCIONAL RÁPIDO --- */}
-        <AtlasCard className="mt-8 border-cyan-900/30 bg-gradient-to-b from-slate-800 to-slate-900">
+       {/* --- SECCIÓN 5: CHECK EMOCIONAL RÁPIDO --- */}
+       <AtlasCard className="mt-8 border-cyan-900/30 bg-gradient-to-b from-slate-800 to-slate-900">
             <h3 className="text-sm text-slate-400 font-mono uppercase mb-4 text-center tracking-widest">
                 Check-in Emocional
             </h3>
@@ -623,6 +625,12 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
                 ))}
             </div>
         </AtlasCard>
+
+        {/* --- SECCIÓN 6: BITÁCORA DEL PACIENTE (NUEVO) --- */}
+        <PatientDiary 
+           patientId={user.uid} 
+           careTeam={patientData?.careTeam} 
+        />
 
       </main>
 
