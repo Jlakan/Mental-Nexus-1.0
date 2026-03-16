@@ -1,6 +1,8 @@
 import React from 'react';
 import PatientSelector from '../PatientSelector'; 
-// Asegúrate de que PatientSelector esté en src/components/, si no ajusta la ruta.
+// Importamos el túnel (Portal). 
+// Usamos '../' porque ModalPortal suele estar una carpeta arriba en src/components/
+import ModalPortal from '../ModalPortal';
 
 interface AppointmentFormProps {
   isOpen: boolean;
@@ -42,83 +44,125 @@ const AppointmentForm: React.FC<AppointmentFormProps> = ({
   if (!isOpen) return null;
 
   return (
-    // CAMBIO AQUI: zIndex subido a 2100 para forzar primer plano absoluto
-    <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:2100}}>
-      
-      {/* Contenedor del modal */}
-      <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'400px', maxHeight:'90vh', overflowY:'auto', boxShadow: '0 10px 25px rgba(0,0,0,0.5)'}}>
-        <h3 style={{marginTop: 0}}>{formData.patientName ? 'Editar Cita' : 'Nueva Cita'}</h3>
+    <ModalPortal>
+      {/* Fondo oscuro del modal */}
+      <div style={{
+        position:'fixed', 
+        inset:0, 
+        background:'rgba(0,0,0,0.6)', 
+        display:'flex', 
+        justifyContent:'center', 
+        alignItems:'center', 
+        zIndex: 1000 // Nivel estándar para que nada lo tape
+      }}>
+        
+        {/* Contenedor blanco del modal */}
+        <div style={{
+          background:'white', 
+          padding:'25px', 
+          borderRadius:'12px', 
+          width:'400px', 
+          maxHeight:'90vh', 
+          overflowY:'auto', 
+          boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
+        }}>
+          <h3 style={{marginTop: 0, color: '#000'}}>
+            {formData.patientName ? 'Editar Cita' : 'Nueva Cita'}
+          </h3>
 
-        {/* ALERTA DE FALTAS */}
-        {selectedPatientNoShows > 0 && (
-          <div style={{background:'#FFEBEE', color:'#D32F2F', padding:'10px', borderRadius:'6px', marginBottom:'15px', border:'1px solid #FFCDD2', fontSize:'13px', display:'flex', alignItems:'center', gap:'10px'}}>
-            <span style={{fontSize:'20px'}}>⚠️</span>
-            <div>
-              <strong>Cuidado:</strong> Este paciente tiene <b>{selectedPatientNoShows} faltas</b> registradas.
+          {/* ALERTA DE FALTAS */}
+          {selectedPatientNoShows > 0 && (
+            <div style={{
+              background:'#FFEBEE', 
+              color:'#D32F2F', 
+              padding:'10px', 
+              borderRadius:'6px', 
+              marginBottom:'15px', 
+              border:'1px solid #FFCDD2', 
+              fontSize:'13px', 
+              display:'flex', 
+              alignItems:'center', 
+              gap:'10px'
+            }}>
+              <span style={{fontSize:'20px'}}>⚠️</span>
+              <div>
+                <strong>Cuidado:</strong> Este paciente tiene <b>{selectedPatientNoShows} faltas</b> registradas.
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        <form onSubmit={onSave}>
-          <PatientSelector
-            patients={patients}
-            selectedPatientId={formData.patientId}
-            manualNameValue={formData.patientName}
-            onSelect={onPatientSelect} 
-          />
-
-          <div style={{display:'flex', gap:'10px', marginTop:'15px'}}>
-            <div style={{flex:1}}>
-              <label style={{fontSize:'12px', color:'#000'}}>Precio Consulta</label>
-              <input
-                type="number"
-                value={formData.price}
-                onChange={(e) => setFormData({...formData, price: Number(e.target.value)})}
-                style={{width:'100%', padding:'8px', boxSizing:'border-box', border:'1px solid #ccc', borderRadius:'4px'}}
-              />
-            </div>
-            <div style={{flex:1}}>
-              <label style={{fontSize:'12px', color:'#000'}}>Método Pago</label>
-              <select
-                value={formData.paymentMethod}
-                onChange={(e) => setFormData({...formData, paymentMethod: e.target.value})}
-                style={{width:'100%', padding:'8px', boxSizing:'border-box', border:'1px solid #ccc', borderRadius:'4px'}}
-              >
-                <option value="cash">Efectivo</option>
-                <option value="transfer">Transferencia</option>
-                <option value="card">Tarjeta</option>
-              </select>
-            </div>
-          </div>
-
-          {/* CHECKBOX FIJAR PRECIO */}
-          <div style={{marginTop:'10px', background:'#f9f9f9', padding:'8px', borderRadius:'4px', display:'flex', alignItems:'center'}}>
-            <input
-              type="checkbox"
-              id="savePriceCheck"
-              checked={savePricePreference}
-              onChange={(e) => setSavePricePreference(e.target.checked)}
-              style={{marginRight:'8px', cursor:'pointer'}}
+          <form onSubmit={onSave}>
+            <PatientSelector
+              patients={patients}
+              selectedPatientId={formData.patientId}
+              manualNameValue={formData.patientName}
+              onSelect={onPatientSelect} 
             />
-            <label htmlFor="savePriceCheck" style={{fontSize:'12px', cursor:'pointer', userSelect:'none', color:'#000'}}>
-              Fijar <b>${formData.price}</b> como precio para futuras citas de este paciente.
-            </label>
-          </div>
 
-          <textarea 
-            placeholder="Notas internas..." 
-            value={formData.adminNotes} 
-            onChange={e => setFormData({...formData, adminNotes: e.target.value})} 
-            style={{width:'100%', marginTop:'15px', padding:'8px', minHeight:'60px', color: '#000'}} 
-          />
+            <div style={{display:'flex', gap:'10px', marginTop:'15px'}}>
+              <div style={{flex:1}}>
+                <label style={{fontSize:'12px', color:'#000'}}>Precio Consulta</label>
+                <input
+                  type="number"
+                  value={formData.price}
+                  onChange={(e) => setFormData({...formData, price: Number(e.target.value)})}
+                  style={{width:'100%', padding:'8px', boxSizing:'border-box', border:'1px solid #ccc', borderRadius:'4px', color: '#000'}}
+                />
+              </div>
+              <div style={{flex:1}}>
+                <label style={{fontSize:'12px', color:'#000'}}>Método Pago</label>
+                <select
+                  value={formData.paymentMethod}
+                  onChange={(e) => setFormData({...formData, paymentMethod: e.target.value})}
+                  style={{width:'100%', padding:'8px', boxSizing:'border-box', border:'1px solid #ccc', borderRadius:'4px', color: '#000'}}
+                >
+                  <option value="cash">Efectivo</option>
+                  <option value="transfer">Transferencia</option>
+                  <option value="card">Tarjeta</option>
+                </select>
+              </div>
+            </div>
 
-          <div style={{marginTop:'20px', textAlign:'right'}}>
-            <button type="button" onClick={onClose} style={{marginRight:'10px', padding:'8px 15px', border:'none', background:'#eee', borderRadius:'4px', cursor:'pointer', color:'#000'}}>Cancelar</button>
-            <button type="submit" style={{padding:'8px 15px', background:'#2196F3', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>Guardar</button>
-          </div>
-        </form>
+            {/* CHECKBOX FIJAR PRECIO */}
+            <div style={{marginTop:'10px', background:'#f9f9f9', padding:'8px', borderRadius:'4px', display:'flex', alignItems:'center'}}>
+              <input
+                type="checkbox"
+                id="savePriceCheck"
+                checked={savePricePreference}
+                onChange={(e) => setSavePricePreference(e.target.checked)}
+                style={{marginRight:'8px', cursor:'pointer'}}
+              />
+              <label htmlFor="savePriceCheck" style={{fontSize:'12px', cursor:'pointer', userSelect:'none', color:'#000'}}>
+                Fijar <b>${formData.price}</b> como precio para futuras citas de este paciente.
+              </label>
+            </div>
+
+            <textarea 
+              placeholder="Notas internas..." 
+              value={formData.adminNotes} 
+              onChange={e => setFormData({...formData, adminNotes: e.target.value})} 
+              style={{width:'100%', marginTop:'15px', padding:'8px', minHeight:'60px', color: '#000', border:'1px solid #ccc', borderRadius:'4px'}} 
+            />
+
+            <div style={{marginTop:'20px', textAlign:'right'}}>
+              <button 
+                type="button" 
+                onClick={onClose} 
+                style={{marginRight:'10px', padding:'8px 15px', border:'none', background:'#eee', borderRadius:'4px', cursor:'pointer', color:'#000'}}
+              >
+                Cancelar
+              </button>
+              <button 
+                type="submit" 
+                style={{padding:'8px 15px', background:'#2196F3', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}
+              >
+                Guardar
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };
 
