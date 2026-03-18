@@ -7,6 +7,7 @@ import {
 import { auth, db } from '../services/firebase';
 
 // Importamos componentes locales
+import { FinancialPanel } from './FinancialPanel';
 import AgendaView from './agenda';
 import AssignmentModal from './AssignmentModal';
 import HistoryModal from './HistoryModal';
@@ -214,17 +215,9 @@ export default function ProfessionalDashboard({ user }: Props) {
   // --- ESTADOS DE V2 (UI) ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [tagsCatalog, setTagsCatalog] = useState<Record<string, string>>({});
-
-  // --- ESTADOS NUEVOS: FINANZAS ---
-  const [showFinances, setShowFinances] = useState(false);
-  const [isFinancialModalOpen, setIsFinancialModalOpen] = useState(false);
-  const [financialData, setFinancialData] = useState({
-    real: 0,
-    proj: 0,
-    bookedCount: 0,
-    availableCount: 0,
-    patientStats: {} as Record<string, { count: number, total: number }>
-  });
+  
+  // --- ESTADO PARA FINANZAS ---
+  const [isFinancePanelOpen, setIsFinancePanelOpen] = useState(false);
 
   // --- EFECTOS (CARGA DE DATOS V1) ---
   useEffect(() => {
@@ -307,75 +300,8 @@ export default function ProfessionalDashboard({ user }: Props) {
           setPendingPatients(pending);
           setActivePatients(active);
         }
-
-        // --- CARGA DE FINANZAS DE LA AGENDA (MES ACTUAL) ---
-        const now = new Date();
-        const yyyy = now.getFullYear();
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const monthId = `${yyyy}_${mm}`;
-        
-        const availRef = doc(db, "professionals", user.uid, "availability", monthId);
-        const availSnap = await getDoc(availRef);
-        
-        if (availSnap.exists()) {
-          const monthData = availSnap.data();
-          let fReal = 0, fProj = 0, fBooked = 0, fAvail = 0;
-          const pStats: Record<string, { count: number, total: number }> = {};
-
-          Object.values(monthData).forEach((slot: any) => {
-            if (!slot || typeof slot !== 'object' || !slot.status) return;
-
-            const price = Number(slot.price) || 0;
-            const pName = slot.patientName || 'Paciente No Registrado';
-
-            if (slot.status === 'completed') {
-              fReal += price;
-              fBooked += 1;
-              if (!pStats[pName]) pStats[pName] = { count: 0, total: 0 };
-              pStats[pName].count += 1;
-              pStats[pName].total += price;
-            } else if (slot.status === 'booked') {
-              fProj += price;
-              fBooked += 1;
-              if (!pStats[pName]) pStats[pName] = { count: 0, total: 0 };
-              pStats[pName].count += 1;
-              pStats[pName].total += price;
-            } else if (slot.status === 'available') {
-              fAvail += 1;
-            }
-          });
-
-          setFinancialData({
-            real: fReal,
-            proj: fProj,
-            bookedCount: fBooked,
-            availableCount: fAvail,
-            patientStats: pStats
-          });
-        }
       }
     } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
-
-  const handleDownloadCSV = () => {
-    let csv = "Paciente,Citas en el Mes,Total Generado\n";
-    Object.entries(financialData.patientStats).forEach(([name, stats]) => {
-      csv += `"${name}",${stats.count},${stats.total}\n`;
-    });
-    
-    // Fila de totales
-    const totalMes = financialData.real + financialData.proj;
-    csv += `\n"TOTALES",${financialData.bookedCount},${totalMes}\n`;
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const now = new Date();
-    link.setAttribute("href", url);
-    link.setAttribute("download", `Reporte_Finanzas_${now.getFullYear()}_${now.getMonth()+1}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   const handleNavigate = (view: string) => {
@@ -621,54 +547,30 @@ export default function ProfessionalDashboard({ user }: Props) {
           {activeView === 'dashboard' && (
             <div className="space-y-6 animate-fadeIn pb-20">
               
-              {/* NUEVA TARJETA: Balance Mensual */}
-              <div className="bg-slate-800 border-l-4 border-emerald-500 rounded-xl p-5 shadow-lg relative overflow-hidden">
-                <div className="flex justify-between items-center border-b border-slate-700 pb-3 mb-4">
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    💰 Balance Mensual
-                  </h3>
-                  <button 
-                    onClick={() => setShowFinances(!showFinances)}
-                    className="text-slate-400 hover:text-white transition-colors"
-                    title={showFinances ? "Ocultar Montos" : "Mostrar Montos"}
-                  >
-                    {showFinances ? '👁️' : '🙈'}
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <div className="text-xs text-slate-400 uppercase">Ingreso Real (Completadas)</div>
-                    <div className="text-xl font-bold text-emerald-400">
-                      {showFinances ? `$${financialData.real.toLocaleString()}` : '***'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-400 uppercase">Proyección (Agendadas)</div>
-                    <div className="text-xl font-bold text-blue-400">
-                      {showFinances ? `$${financialData.proj.toLocaleString()}` : '***'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-400 uppercase">Total de Citas (Mes)</div>
-                    <div className="text-xl font-bold text-white">{financialData.bookedCount}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-400 uppercase">Lugares Disponibles</div>
-                    <div className="text-xl font-bold text-slate-300">{financialData.availableCount}</div>
+              {/* Botón Colapsable de Finanzas */}
+              <button 
+                onClick={() => setIsFinancePanelOpen(!isFinancePanelOpen)}
+                className="w-full flex justify-between items-center bg-slate-800 border-l-4 border-emerald-500 rounded-xl p-5 shadow-lg hover:bg-slate-700 transition-colors focus:outline-none"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">💰</span>
+                  <div className="text-left">
+                    <div className="text-lg font-bold text-white leading-none">Inteligencia Financiera</div>
+                    <div className="text-xs text-slate-400 mt-1">Cuentas por cobrar, ausentismo y proyecciones</div>
                   </div>
                 </div>
+                <span className="text-slate-400 bg-slate-900 w-8 h-8 rounded-full flex items-center justify-center font-bold transition-transform duration-300" style={{ transform: isFinancePanelOpen ? 'rotate(180deg)' : 'rotate(0)' }}>
+                  ▼
+                </span>
+              </button>
 
-                <div className="mt-4 pt-3 border-t border-slate-700 text-right">
-                  <button 
-                    onClick={() => setIsFinancialModalOpen(true)}
-                    className="text-sm font-bold text-nexus-cyan hover:text-cyan-300"
-                  >
-                    Generar Informe Detallado →
-                  </button>
-                </div>
-              </div>
-
+              {/* Panel Financiero Desplegado */}
+              {isFinancePanelOpen && (
+                 <div className="animate-fadeIn">
+                    <FinancialPanel professionalId={user.uid} />
+                 </div>
+              )}
+              
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                 <div className="nexus-card flex items-center gap-4">
                   <div className="p-4 bg-blue-900/30 rounded-lg text-blue-400 text-3xl">👥</div>
@@ -915,60 +817,6 @@ export default function ProfessionalDashboard({ user }: Props) {
 
         </div>
       </main>
-
-      {/* --- MODAL DE REPORTE FINANCIERO --- */}
-      {isFinancialModalOpen && (
-        <div className="fixed inset-0 bg-black/80 flex justify-center items-center z-[9999] p-4">
-          <div className="bg-slate-800 p-6 rounded-xl w-full max-w-2xl border border-slate-700 shadow-2xl animate-scaleIn flex flex-col max-h-[90vh]">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-white">Informe Financiero por Paciente</h3>
-              <button onClick={() => setIsFinancialModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
-            
-            <div className="overflow-y-auto custom-scrollbar flex-1 mb-4 border border-slate-700 rounded-lg">
-              <table className="w-full text-sm text-left text-slate-300">
-                <thead className="text-xs text-slate-500 uppercase bg-slate-900 sticky top-0">
-                  <tr>
-                    <th className="px-4 py-3">Paciente</th>
-                    <th className="px-4 py-3 text-center">Citas (Mes)</th>
-                    <th className="px-4 py-3 text-right">Ingreso Generado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700">
-                  {Object.entries(financialData.patientStats).map(([name, stats], index) => (
-                    <tr key={index} className="hover:bg-slate-800/50">
-                      <td className="px-4 py-3 font-medium text-white">{name}</td>
-                      <td className="px-4 py-3 text-center">{stats.count}</td>
-                      <td className="px-4 py-3 text-right text-emerald-400">${stats.total.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                  {Object.keys(financialData.patientStats).length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="px-4 py-8 text-center text-slate-500 italic">No hay citas registradas en este mes.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex justify-between items-center bg-slate-900 p-3 rounded-lg border border-slate-700 mb-4">
-              <span className="text-slate-400 font-bold uppercase text-xs">Total Proyectado y Real</span>
-              <span className="text-xl font-bold text-white">${(financialData.real + financialData.proj).toLocaleString()}</span>
-            </div>
-
-            <div className="flex gap-3 justify-end">
-              <button onClick={() => setIsFinancialModalOpen(false)} className="px-4 py-2 text-slate-400 hover:text-white text-sm">Cerrar</button>
-              <button 
-                onClick={handleDownloadCSV} 
-                className="px-4 py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-500 text-sm flex items-center gap-2"
-                disabled={Object.keys(financialData.patientStats).length === 0}
-              >
-                📥 Descargar CSV
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* MODAL DE FUSIÓN */}
       {isMergeModalOpen && patientToApprove && (
