@@ -27,6 +27,9 @@ interface AgendaSidebarProps {
   onDeleteWaitlist: (id: string) => void;
   onReactivatePatient: (id: string, name: string) => void;
 
+  // --- CAMBIO 1: Nueva prop para ver el detalle ---
+  onViewWaitlistDetail: (patient: any) => void; 
+
   // Prop para responsive
   isMobile: boolean; 
   
@@ -39,6 +42,7 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
   activeSidePanel, setActiveSidePanel, isPausedSidebarOpen, setIsPausedSidebarOpen,
   patientsNeedingAppt, waitlist, pausedList,
   onOpenPausedSidebar, onScheduleNeeding, onArchivePatient, onAddWaitlist, onDeleteWaitlist, onReactivatePatient,
+  onViewWaitlistDetail, // --- DESESTRUCTURACIÓN DEL CAMBIO 1 ---
   isMobile,
   onSyncPatients
 }) => {
@@ -62,16 +66,12 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
 
   // 1. Estilo del Contenedor Principal (Fusión V1 y V2)
   const containerStyle: React.CSSProperties = {
-    // Si es móvil, ocupa el 100% de su contenedor padre (el drawer).
-    // Si es escritorio, impone su ancho de 280px (V1).
     width: isMobile ? '100%' : '280px', 
     height: '100%',
     background: 'white',
     display: 'flex',
     flexDirection: 'column',
     position: 'relative',
-    
-    // Restauramos bordes y sombras para escritorio (V1)
     borderRight: isMobile ? 'none' : '1px solid #ddd', 
     boxShadow: isMobile ? 'none' : '2px 0 5px rgba(0,0,0,0.05)',
     zIndex: 20 
@@ -80,12 +80,10 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
   // 2. Estilo de Paneles Secundarios (V2)
   const sidePanelStyle: React.CSSProperties = isMobile 
     ? { 
-        // Móvil: Cubre todo el sidebar (Superposición)
         position: 'absolute', inset: 0, 
         background: 'white', zIndex: 30, display: 'flex', flexDirection: 'column' 
       }
     : { 
-        // Escritorio: Sale a la derecha (Expansión)
         position: 'absolute', left: '100%', top: 0, bottom: 0, 
         width: '320px', background: 'white', 
         boxShadow: '5px 0 15px rgba(0,0,0,0.1)', zIndex: 19, 
@@ -96,14 +94,12 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
     <div style={containerStyle}>
       
       {/* --- MENÚ PRINCIPAL --- */}
-      {/* Añadimos paddingBottom: '80px' para que el botón flotante no tape las últimas opciones */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', paddingBottom: '80px' }}>
         <h3 style={{marginTop:0, color:'#333'}}>Opciones</h3>
 
         <button onClick={onOpenConfig} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'white', border:'1px solid #ccc', borderRadius:'6px', cursor:'pointer', textAlign:'left'}}>⚙️ Configurar</button>
         <button onClick={onOpenEvents} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'#F3E5F5', border:'1px solid #E1BEE7', color:'#7B1FA2', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', textAlign:'left'}}>📅 Mis Eventos</button>
 
-        {/* --- BOTÓN DE SINCRONIZACIÓN NUEVO --- */}
         <button onClick={onSyncPatients} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'#E8F5E9', border:'1px solid #C8E6C9', color:'#2E7D32', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', textAlign:'left'}}>
           🔄 Auditar Pacientes
         </button>
@@ -186,9 +182,23 @@ const AgendaSidebar: React.FC<AgendaSidebarProps> = ({
                 <>
                   <button onClick={onAddWaitlist} style={{width:'100%', marginBottom:'10px', padding:'8px', background:'#1976D2', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>+ Agregar a Espera</button>
                   {waitlist.map(w => (
-                    <div key={w.id} style={{background:'white', border:'1px solid #eee', borderLeft:'4px solid #FFA000', padding:'10px', marginBottom:'8px'}}>
+                    // --- CAMBIO 2: Evento onClick para abrir detalle y cursor pointer ---
+                    <div 
+                      key={w.id} 
+                      onClick={() => onViewWaitlistDetail(w)} 
+                      style={{background:'white', border:'1px solid #eee', borderLeft:'4px solid #FFA000', padding:'10px', marginBottom:'8px', cursor: 'pointer'}}
+                    >
                       <div style={{fontWeight:'bold', color: '#222'}}>{w.patientName}</div>
-                      <button onClick={() => onDeleteWaitlist(w.id)} style={{color:'red', border:'none', background:'none', cursor:'pointer', fontSize:'11px'}}>Eliminar</button>
+                      <button 
+                        onClick={(e) => { 
+                          // --- CAMBIO 3: stopPropagation para que al eliminar no se abra el modal ---
+                          e.stopPropagation(); 
+                          onDeleteWaitlist(w.id); 
+                        }} 
+                        style={{color:'red', border:'none', background:'none', cursor:'pointer', fontSize:'11px'}}
+                      >
+                        Eliminar
+                      </button>
                     </div>
                   ))}
                 </>

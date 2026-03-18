@@ -3,28 +3,22 @@ import {
   doc, getDoc, collection, query, where, getDocs,
   setDoc, updateDoc, writeBatch, arrayUnion, orderBy, deleteDoc, addDoc, serverTimestamp, deleteField, increment
 } from "firebase/firestore";
-// Ajuste de ruta: subimos dos niveles para llegar a services
 import { db } from '../../services/firebase';
 
-// Ajuste de ruta: subimos un nivel para componentes hermanos
 import PatientSelector from '../PatientSelector';
 import AgendaConfigModal from '../AgendaConfigModal';
 
-// Ajuste de ruta: subimos dos niveles para utils
 import { generateMonthSkeleton } from '../../utils/agendaGenerator';
 import type { MonthlySlotMap, WorkConfig, AgendaSlot } from '../../utils/agendaTypes';
 
-// Importamos los NUEVOS sub-componentes
 import AgendaSidebar from './AgendaSidebar';
 import AppointmentForm from './AppointmentForm';
-// IMPORTACIÓN DEL PORTAL
 import ModalPortal from '../ModalPortal';
 
 import dayjs from 'dayjs';
 import 'dayjs/locale/es';
 import updateLocale from 'dayjs/plugin/updateLocale';
 
-// CONFIGURACIÓN DAYJS
 dayjs.extend(updateLocale);
 dayjs.locale('es');
 dayjs.updateLocale('es', { weekStart: 0 });
@@ -97,36 +91,29 @@ const getDateFromSlotKey = (slotKey: string, year: number, month: number): Date 
 };
 
 export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }: Props) {
-  // --- RESPONSIVE STATE ---
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
-  // --- CONTEXTO ---
   const [myProfessionals, setMyProfessionals] = useState<any[]>([]);
   const [selectedProfId, setSelectedProfId] = useState<string>(doctorId || '');
 
-  // --- DATOS AGENDA ---
   const [currentMonthData, setCurrentMonthData] = useState<MonthlySlotMap | null>(null);
   const [isMonthInitialized, setIsMonthInitialized] = useState(false);
   const [patients, setPatients] = useState<any[]>([]);
 
-  // --- META MENSUAL ---
   const [monthGoal, setMonthGoal] = useState<string>('');
   const [isEditingGoal, setIsEditingGoal] = useState(false);
 
-  // --- LISTAS AUXILIARES ---
   const [waitlist, setWaitlist] = useState<any[]>([]);
   const [patientsNeedingAppt, setPatientsNeedingAppt] = useState<any[]>([]);
   const [annualEvents, setAnnualEvents] = useState<AnnualEvent[]>([]);
 
-  // --- UI STATE & CONFIG ---
   const [workConfig, setWorkConfig] = useState<WorkConfig>(DEFAULT_CONFIG);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [eventsTab, setEventsTab] = useState<'upcoming' | 'past'>('upcoming');
   const [activeSidePanel, setActiveSidePanel] = useState<'none' | 'needing' | 'waitlist'>('none');
 
-  // --- NUEVOS ESTADOS: PAUSADOS ---
   const [isPausedSidebarOpen, setIsPausedSidebarOpen] = useState(false);
   const [pausedList, setPausedList] = useState<any[]>([]);
 
@@ -139,12 +126,14 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   const [isEventsManagerOpen, setIsEventsManagerOpen] = useState(false);
   const [isNewEventModalOpen, setIsNewEventModalOpen] = useState(false);
 
-  // --- CONFLICT RESOLUTION STATE ---
+  // ESTADO PARA DETALLE DE ESPERA (CORRECCIÓN SOLICITADA)
+  const [selectedWaitlistEntry, setSelectedWaitlistEntry] = useState<any | null>(null);
+  const [isWaitlistDetailOpen, setIsWaitlistDetailOpen] = useState(false);
+
   const [conflictList, setConflictList] = useState<ConflictItem[]>([]);
   const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [pendingEventSave, setPendingEventSave] = useState<{start: dayjs.Dayjs, end: dayjs.Dayjs, title: string, isEdit: boolean} | null>(null);
 
-  // Modal de Confirmación
   const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({
     isOpen: false, title: '', message: '', onConfirm: () => {}
   });
@@ -152,7 +141,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   const [slotToReassign, setSlotToReassign] = useState<string | null>(null);
   const [targetSlotKey, setTargetSlotKey] = useState<string | null>(null);
 
-  // Edit Event State
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [originalEventData, setOriginalEventData] = useState<AnnualEvent | null>(null);
   const [newEventData, setNewEventData] = useState<{start: dayjs.Dayjs, end: dayjs.Dayjs, title: string}>({
@@ -173,7 +161,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   const [savePricePreference, setSavePricePreference] = useState(false);
   const [selectedPatientNoShows, setSelectedPatientNoShows] = useState<number>(0);
 
-  // --- DETECTOR DE MÓVIL (HOOK) ---
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth < 768;
@@ -195,7 +182,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     }
   }, [isNewEventModalOpen, editingEventId]);
 
-  // CARGA INICIAL
   useEffect(() => {
     const loadContext = async () => {
       try {
@@ -226,7 +212,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     loadContext();
   }, [currentUserId, userRole, doctorId]);
 
-  // 1. Cargar datos de la agenda (mes, espera, eventos) - SEPARADO
   useEffect(() => {
     if (!selectedProfId) return;
     loadMonthDoc();
@@ -234,7 +219,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     loadAnnualEvents();
   }, [selectedProfId, selectedDate.getMonth(), selectedDate.getFullYear()]);
 
-  // 2. Cargar pacientes - SEPARADO para arreglar el bug de los Asistentes
   useEffect(() => {
     if (!selectedProfId || myProfessionals.length === 0) return;
     loadPatients();
@@ -254,8 +238,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
       if (isPausedSidebarOpen) { fetchPausedPatients(); }
     }
   }, [patients, selectedProfId]);
-
-  // --- LÓGICA DE DATOS ---
 
   const fetchPausedPatients = async () => {
       if (patients.length > 0 && selectedProfId) {
@@ -346,6 +328,11 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     } catch(e) { console.error(e); }
   };
 
+  const handleViewWaitlistDetail = (entry: any) => {
+    setSelectedWaitlistEntry(entry);
+    setIsWaitlistDetailOpen(true);
+  };
+
   const handleSaveGoal = async () => {
     if(!selectedProfId || !isMonthInitialized) return;
     try {
@@ -376,7 +363,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     });
   };
 
-  // --- GESTIÓN DE EVENTOS (Simplificado) ---
   const detectConflicts = async (start: dayjs.Dayjs, end: dayjs.Dayjs): Promise<ConflictItem[]> => {
     const startMs = start.toDate().getTime();
     const endMs = end.toDate().getTime();
@@ -562,7 +548,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   const handlePrevMonth = () => setSelectedDate(new Date(selectedDate.setMonth(selectedDate.getMonth()-1)));
   const handleNextMonth = () => setSelectedDate(new Date(selectedDate.setMonth(selectedDate.getMonth()+1)));
 
-  // --- ACTIONS AGENDA ---
   const handleInitializeMonth = async () => {
     if (!window.confirm(`¿Generar agenda para ${selectedDate.toLocaleDateString('es-ES', {month:'long'})}?`)) return;
     setLoading(true);
@@ -579,7 +564,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // --- FUNCIÓN AUDITORA: SINCRONIZAR PACIENTES VS AGENDA ---
   const handleSyncPatients = async () => {
     if (!window.confirm("¿Sincronizar expedientes?\n\nEsto escaneará la agenda actual para detectar citas y sacará a los pacientes correctos de la lista 'Sin Cita'.")) return;
     setLoading(true);
@@ -634,7 +618,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
           }
         } 
         else if (currentNextAppt && currentNextAppt > now) {
-           batch.update(doc(db, "patients", p.id), {
+            batch.update(doc(db, "patients", p.id), {
               [`careTeam.${selectedProfId}.nextAppointment`]: null,
               [`careTeam.${selectedProfId}.lastUpdate`]: new Date().toISOString()
             });
@@ -673,6 +657,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
       setCurrentMonthData(mergedSlots);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
+
   const handleSaveConfig = async (newConfig: WorkConfig) => {
     setLoading(true);
     try {
@@ -680,6 +665,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
       setWorkConfig(newConfig); setIsConfigOpen(false); alert("Configuración guardada.");
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
+
   const handleAddExtraSlot = async () => {
     const timeStr = window.prompt("Hora del turno extra (HH:MM):", "18:00"); if (!timeStr) return;
     const [h, m] = timeStr.split(':').map(Number);
@@ -694,6 +680,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
       setCurrentMonthData({ ...currentMonthData, [slotKey]: newSlot });
     } catch (e) { console.error(e); }
   };
+
   const handleBlockDay = async () => {
     const reason = window.prompt("Motivo del bloqueo:"); if (!reason) return;
     if (!window.confirm("¿Bloquear día completo?")) return;
@@ -895,13 +882,31 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     if (waitlist.length > 0) { if (window.confirm(`⚠️ Hay ${waitlist.length} personas en espera. ¿ASIGNAR espacio a la lista?`)) { setSlotToReassign(slotKey); setIsWaitlistSelectorOpen(true); return; } }
     if(window.confirm("¿CANCELAR la cita actual?")) { handleSoftCancel(slotKey); }
   };
-  const handleAssignFromWaitlist = async (waitlistItem: any) => { if (!slotToReassign || !currentMonthData) return; setLoading(true); try { const year = selectedDate.getFullYear();
-  const month = selectedDate.getMonth(); const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; const batch = writeBatch(db);
-  const slotPayload: Partial<AgendaSlot> = { status: 'booked', patientId: waitlistItem.patientId || undefined, patientName: waitlistItem.patientName, patientExternalPhone: waitlistItem.patientExternalPhone, adminNotes: `[Desde Espera] ${waitlistItem.notes || ''}`, paymentStatus: 'pending', updatedAt: new Date().toISOString() };
-  batch.update(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotToReassign}`]: { ...currentMonthData[slotToReassign], ...slotPayload } });
-  if (waitlistItem.patientId) { const apptDate = getDateFromSlotKey(slotToReassign, year, month); batch.update(doc(db, "patients", waitlistItem.patientId), { [`careTeam.${selectedProfId}.nextAppointment`]: apptDate.toISOString() }); } batch.delete(doc(db, "waitlist", waitlistItem.id));
-  await batch.commit(); setCurrentMonthData({ ...currentMonthData, [slotToReassign]: { ...currentMonthData[slotToReassign], ...slotPayload as AgendaSlot } }); loadWaitlist(); loadPatients(); setIsWaitlistSelectorOpen(false); setSlotToReassign(null);
-  alert( `✅ Reasignado a ${waitlistItem.patientName}`); } catch (e) { console.error(e); } finally { setLoading(false); } };
+
+  const handleAssignFromWaitlist = async (waitlistItem: any) => { 
+    if (!slotToReassign || !currentMonthData) return; 
+    setLoading(true); 
+    try { 
+      const year = selectedDate.getFullYear();
+      const month = selectedDate.getMonth(); 
+      const monthDocId = `${year}_${month.toString().padStart(2, '0')}`; 
+      const batch = writeBatch(db);
+      const slotPayload: Partial<AgendaSlot> = { status: 'booked', patientId: waitlistItem.patientId || undefined, patientName: waitlistItem.patientName, patientExternalPhone: waitlistItem.patientExternalPhone, adminNotes: `[Desde Espera] ${waitlistItem.notes || ''}`, paymentStatus: 'pending', updatedAt: new Date().toISOString() };
+      batch.update(doc(db, "professionals", selectedProfId, "availability", monthDocId), { [`slots.${slotToReassign}`]: { ...currentMonthData[slotToReassign], ...slotPayload } });
+      if (waitlistItem.patientId) { 
+        const apptDate = getDateFromSlotKey(slotToReassign, year, month); 
+        batch.update(doc(db, "patients", waitlistItem.patientId), { [`careTeam.${selectedProfId}.nextAppointment`]: apptDate.toISOString() }); 
+      } 
+      batch.delete(doc(db, "waitlist", waitlistItem.id));
+      await batch.commit(); 
+      setCurrentMonthData({ ...currentMonthData, [slotToReassign]: { ...currentMonthData[slotToReassign], ...slotPayload as AgendaSlot } }); 
+      loadWaitlist(); 
+      loadPatients(); 
+      setIsWaitlistSelectorOpen(false); 
+      setSlotToReassign(null);
+      alert( `✅ Reasignado a ${waitlistItem.patientName}`); 
+    } catch (e) { console.error(e); } finally { setLoading(false); } 
+  };
 
   const handleAddToWaitlist = async (e: React.FormEvent) => {
     e.preventDefault(); if (!formData.patientName) return alert("Nombre requerido"); setLoading(true); try {
@@ -913,7 +918,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     setTargetSlotKey(slotKey);
     setFormData({ patientId: slot.patientId || '', patientName: slot.patientName || (slot.status === 'blocked' ? 'BLOQUEADO' : ''), patientExternalPhone: slot.patientExternalPhone || '', patientExternalEmail: slot.patientExternalEmail || '', price: slot.price, adminNotes: slot.adminNotes || '', paymentStatus: slot.paymentStatus || 'pending', paymentMethod: slot.paymentMethod || 'cash' });
     setSavePricePreference(false); setSelectedPatientNoShows(0); 
-    // --- CORRECCIÓN: CERRAR VISTA DE DÍA ---
     setIsDayViewOpen(false);
     setIsFormOpen(true);
   };
@@ -928,7 +932,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     if (isMobile) setShowMobileSidebar(false);
   };
 
-  // NUEVA FUNCIÓN AÑADIDA PARA CANCELAR LA SELECCIÓN
   const handleCancelSelection = () => {
     setFormData({
       patientId: '',
@@ -979,7 +982,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
                       if (isPast) { alert("Fecha pasada."); return; } 
                       if (formData.patientId && formData.patientName) { 
                           setTargetSlotKey(key); 
-                          // --- CORRECCIÓN: CERRAR VISTA DE DÍA ---
                           setIsDayViewOpen(false);
                           setIsFormOpen(true); 
                       } else { openForm(key, slot); } 
@@ -995,7 +997,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
                   </div>
                 ) : (
                   <div onClick={() => openForm(key, slot)} style={{background: slot.paymentStatus==='paid'?'#E8F5E9':'#E3F2FD', borderLeft:`4px solid ${slot.paymentStatus==='paid'?'#4CAF50':'#2196F3'}`, padding:'10px', borderRadius:'6px', position:'relative', cursor:'pointer'}}>
-                    {/* AQUÍ ESTÁ EL ARREGLO DE COLOR (color: '#222' y color: '#555') */}
                     <div style={{fontWeight:'bold', paddingRight:'65px', color: '#222'}}>{slot.patientName}</div> 
                     <div style={{fontSize:'12px', color:'#555', marginTop: '2px'}}>{slot.adminNotes || 'Sin notas'}</div> 
                     <div style={{fontSize:'11px', fontWeight:'bold', marginTop:'4px', color:'#1565C0'}}>${slot.price}</div>
@@ -1019,7 +1020,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'sans-serif', background:'#f5f5f5', overflow:'hidden', position: 'relative' }}>
 
-      {/* --- SIDEBAR COMPONETIZADO (MÓVIL FRIENDLY) --- */}
       <div style={{
           position: isMobile ? 'absolute' : 'relative',
           zIndex: 99,
@@ -1050,6 +1050,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
           onAddWaitlist={() => { setFormData({ ...formData, patientId: '', patientName: '', adminNotes: '' }); setIsWaitlistFormOpen(true); }}
           onDeleteWaitlist={handleDeleteWaitlistItem}
           onReactivatePatient={handleReactivatePatient}
+          onViewWaitlistDetail={handleViewWaitlistDetail}
           isMobile={isMobile}
           onSyncPatients={handleSyncPatients}
         />
@@ -1066,7 +1067,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         )}
       </div>
 
-      {/* OVERLAY PARA CERRAR EN MÓVIL AL TOCAR AFUERA */}
       {isMobile && showMobileSidebar && (
         <div 
           onClick={() => setShowMobileSidebar(false)}
@@ -1074,10 +1074,8 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         />
       )}
 
-      {/* --- ÁREA PRINCIPAL (CALENDARIO) --- */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position:'relative', minWidth: 0 }}>
         
-        {/* HEADER MORADO CON BOTÓN DE MENÚ */}
         <div style={{background: '#673AB7', color: 'white', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)'}}>
           
           {isMobile && (
@@ -1127,7 +1125,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
           </div>
         </div>
 
-        {/* --- BANNER FLOTANTE DE PACIENTE SELECCIONADO (OPCIÓN C) --- */}
         {!isFormOpen && formData.patientId && formData.patientName && (
           <div style={{
             position: 'absolute',
@@ -1168,7 +1165,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
 
       </div>
 
-      {/* --- MODALES INLINE --- */}
       {isDayViewOpen && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'end', zIndex:100}}>
           <div style={{width: isMobile ? '100%' : '400px', background:'white', height:'100%', padding:'20px', display:'flex', flexDirection:'column', boxShadow:'-5px 0 20px rgba(0,0,0,0.1)'}}>
@@ -1181,7 +1177,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         </div>
       )}
 
-      {/* MODAL EVENTS MANAGER */}
       {isEventsManagerOpen && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:50}}>
           <div style={{background:'white', padding:'0', borderRadius:'12px', width:'500px', maxHeight:'80vh', overflow:'hidden', display:'flex', flexDirection:'column'}}>
@@ -1205,18 +1200,16 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         </div>
       )}
 
-      {/* MODAL NUEVO/EDITAR EVENTO */}
       {isNewEventModalOpen && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:60}}>
           <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'350px'}}>
             <h3>{editingEventId ? '✏️ Editar Evento' : '➕ Nuevo Evento'}</h3> <DateSelectorRow label="Desde:" dateValue={newEventData.start} onChange={(d) => setNewEventData({...newEventData, start: d})} /> <DateSelectorRow label="Hasta:" dateValue={newEventData.end} onChange={(d) => setNewEventData({...newEventData, end: d})} />
             <label style={{display:'block', marginTop:'15px'}}> <span style={{fontSize:'12px', fontWeight:'bold', color:'#666'}}>Título:</span> <input type="text" value={newEventData.title} onChange={e => setNewEventData({...newEventData, title: e.target.value})} style={{width:'100%', padding:'8px', marginTop:'5px', borderRadius:'4px', border:'1px solid #ccc'}} /> </label>
-            <div style={{marginTop:'20px', textAlign:'right'}}> <button onClick={() => { setIsNewEventModalOpen(false); setEditingEventId(null); setConflictList([]); }} style={{marginRight:'10px', padding:'8px 15px', background:'#eee', border:'none', borderRadius:'4px', cursor:'pointer'}}>Cancelar</button> <button onClick={handleSaveEvent} style={{background:'#4CAF50', color:'cla', border:'none', padding:'8px 15px', borderRadius:'4px', cursor:'pointer', fontWeight:'bold'}}>Guardar</button> </div>
+            <div style={{marginTop:'20px', textAlign:'right'}}> <button onClick={() => { setIsNewEventModalOpen(false); setEditingEventId(null); setConflictList([]); }} style={{marginRight:'10px', padding:'8px 15px', background:'#eee', border:'none', borderRadius:'4px', cursor:'pointer'}}>Cancelar</button> <button onClick={handleSaveEvent} style={{background:'#4CAF50', color:'white', border:'none', padding:'8px 15px', borderRadius:'4px', cursor:'pointer', fontWeight:'bold'}}>Guardar</button> </div>
           </div>
         </div>
       )}
 
-      {/* MODAL CONFLICTOS - ENVUELTO EN PORTAL */}
       {isConflictModalOpen && (
         <ModalPortal>
           <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:2000}}>
@@ -1231,7 +1224,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         </ModalPortal>
       )}
 
-      {/* --- FORMULARIO DE CITA COMPONETIZADO --- */}
       <AppointmentForm
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
@@ -1245,8 +1237,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         onPatientSelect={handlePatientSelect}
       />
 
-      {/* MODAL ADD WAITLIST */}
-      {/* MODAL ADD WAITLIST - CORREGIDO CON PORTAL Y Z-INDEX */}
 {isWaitlistFormOpen && (
   <ModalPortal>
     <div style={{
@@ -1257,7 +1247,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
       display:'flex', 
       justifyContent:'center', 
       alignItems:'center', 
-      zIndex: 3000 // Subir de 30 a 3000 para que sea visible
+      zIndex: 3000 
     }}>
       <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'350px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)'}}>
         <h3 style={{marginTop: 0, color: '#000'}}>Agregar a Lista de Espera</h3>
@@ -1284,7 +1274,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   </ModalPortal>
 )}
 
-      {/* MODAL WAITLIST SELECTOR */}
       {isWaitlistSelectorOpen && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:40}}>
           <div style={{background:'white', padding:'25px', borderRadius:'12px', width:'400px', maxHeight:'80vh', overflowY:'auto'}}>
@@ -1295,9 +1284,66 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
         </div>
       )}
 
+      {/* MODAL DETALLE DE LISTA DE ESPERA (CON PORTAL) */}
+      {isWaitlistDetailOpen && selectedWaitlistEntry && (
+        <ModalPortal>
+          <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:4000}}>
+            <div style={{background:'white', padding:'25px', borderRadius:'12px', width: isMobile ? '90%' : '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)'}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', borderBottom:'1px solid #eee', paddingBottom:'10px'}}>
+                <h3 style={{margin:0, color: '#1976D2'}}>⏳ Detalle de Espera</h3>
+                <button onClick={() => setIsWaitlistDetailOpen(false)} style={{border:'none', background:'none', fontSize:'24px', cursor:'pointer', color:'#999'}}>✕</button>
+              </div>
+              
+              <div style={{marginBottom:'15px'}}>
+                <label style={{fontSize:'12px', color:'#666', fontWeight:'bold', textTransform:'uppercase'}}>Paciente:</label>
+                <div style={{fontSize:'18px', color:'#222', marginTop:'4px', fontWeight:'500'}}>{selectedWaitlistEntry.patientName}</div>
+              </div>
+
+              <div style={{marginBottom:'15px'}}>
+                <label style={{fontSize:'12px', color:'#666', fontWeight:'bold', textTransform:'uppercase'}}>Notas / Motivo:</label>
+                <div style={{
+                  background: '#F9F9F9', 
+                  padding: '12px', 
+                  borderRadius: '8px', 
+                  marginTop: '8px', 
+                  fontSize: '14px', 
+                  color: '#444',
+                  border: '1px solid #eee',
+                  whiteSpace: 'pre-wrap',
+                  minHeight: '80px'
+                }}>
+                  {selectedWaitlistEntry.notes || "Sin notas adicionales."}
+                </div>
+              </div>
+
+              <div style={{fontSize:'11px', color:'#999', textAlign:'right'}}>
+                ID Doc: <span style={{fontFamily:'monospace'}}>{selectedWaitlistEntry.id}</span>
+              </div>
+
+              <div style={{marginTop:'25px', display:'flex', gap:'10px'}}>
+                <button 
+                  onClick={() => setIsWaitlistDetailOpen(false)} 
+                  style={{flex:1, padding:'12px', background:'#eee', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold', color:'#000'}}
+                >
+                  Cerrar
+                </button>
+                <button 
+                  onClick={() => {
+                    handleDeleteWaitlistItem(selectedWaitlistEntry.id);
+                    setIsWaitlistDetailOpen(false);
+                  }}
+                  style={{padding:'12px', background:'#FFEBEE', color:'#D32F2F', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}
+                >
+                  🗑️ Eliminar
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
       <AgendaConfigModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} currentConfig={workConfig} onSave={handleSaveConfig} />
       
-      {/* MODAL CONFIRMACIÓN - ENVUELTO EN PORTAL */}
       {confirmModal.isOpen && (
         <ModalPortal>
           <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:3000}}>
