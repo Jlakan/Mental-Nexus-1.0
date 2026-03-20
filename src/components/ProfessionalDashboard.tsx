@@ -14,6 +14,8 @@ import HistoryModal from './HistoryModal';
 import DashboardMenu from './DashboardMenu';
 import PatientDirectory from './PatientDirectory';
 import { analyzeCatalogBatch } from '../utils/ClinicalEngine';
+import { useTagsDictionary } from '../hooks/useTagsDictionary';
+import { PredictiveTagSearch } from './PredictiveTagSearch';
 
 interface Props {
   user: any;
@@ -89,7 +91,8 @@ const TaskProgressBar = ({ task }: { task: any }) => {
   );
 };
 
-const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) => {
+// --- AÑADIDOS LOS PROPS DEL DICCIONARIO ---
+const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag, dictionary, profession }: any) => {
   const [newTag, setNewTag] = useState('');
 
   const activeTasks = tasks.filter((t:any) => t.status !== 'completed');
@@ -158,20 +161,16 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag }: any) =
           ))}
         </div>
 
-        <div className="flex bg-slate-900 border border-slate-700 rounded-lg p-1">
-          <input
-            className="flex-1 bg-transparent border-none text-xs text-white outline-none px-2 py-1 placeholder-slate-600"
-            value={newTag}
-            onChange={(e) => setNewTag(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { onAddTag(newTag); setNewTag(''); }}}
-            placeholder="+ Agregar (ej. 'ansiedad')..."
+        {/* AQUÍ ESTÁ LA MAGIA: El nuevo buscador predictivo integrado */}
+        <div className="flex bg-slate-900 border border-slate-700 rounded-lg p-1 relative w-full">
+          <PredictiveTagSearch 
+            dictionary={dictionary || []} 
+            onSelectTag={(tagEntry) => {
+              onAddTag(tagEntry.masterTag); 
+            }} 
+            placeholder="+ Buscar síntoma (ej. 'ansiedad')..."
+            profession={profession}
           />
-          <button
-            onClick={() => { onAddTag(newTag); setNewTag(''); }}
-            className="text-nexus-cyan text-[10px] font-bold uppercase px-2 hover:bg-white/5 rounded"
-          >
-            Guardar
-          </button>
         </div>
       </div>
 
@@ -218,6 +217,10 @@ export default function ProfessionalDashboard({ user }: Props) {
   
   // --- ESTADO PARA FINANZAS ---
   const [isFinancePanelOpen, setIsFinancePanelOpen] = useState(false);
+
+  // --- NUEVO: HOOK DE CONEXIÓN CON EL DICCIONARIO INTELIGENTE ---
+  const professionToUse = profData?.professionType || 'psicologia';
+  const { dictionary } = useTagsDictionary(professionToUse);
 
   // --- EFECTOS (CARGA DE DATOS V1) ---
   useEffect(() => {
@@ -764,11 +767,14 @@ export default function ProfessionalDashboard({ user }: Props) {
                 </div>
               </div>
 
+              {/* AQUÍ SE PASAN LOS NUEVOS PROPS AL COMPONENTE DE TAGS */}
               <PatientVisualStats
                 tasks={patientTasks}
                 indicators={selectedPatient.clinicalIndicators?.[user.uid] || []}
                 onAddTag={handleAddIndicator}
                 onDeleteTag={handleDeleteIndicator}
+                dictionary={dictionary}
+                profession={professionToUse}
               />
 
               <div className="space-y-4">

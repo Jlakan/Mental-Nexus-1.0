@@ -12,7 +12,7 @@ import GameEconomyPanel from './GameEconomyPanel';
 import AdminBulkTools from './AdminBulkTools';
 
 // Tipos
-import type { Assignment } from '../types'; // Asegúrate de que esta ruta apunte a tu definición de Assignment
+import type { Assignment } from '../types'; 
 
 // Importaciones de Inteligencia
 import { analyzeCatalogBatch } from '../utils/ClinicalEngine';
@@ -25,9 +25,10 @@ export default function AdminPanel() {
   // Estados de datos
   const [usersList, setUsersList] = useState<any[]>([]);
   const [pendingPros, setPendingPros] = useState<any[]>([]);
+  const [professionalsList, setProfessionalsList] = useState<any[]>([]); // NUEVO: Para el selector de asignación
   const [globalConfig, setGlobalConfig] = useState({ appDownloadLink: '' });
   
-  // Estados de UI (loading eliminado porque no se usaba en el render)
+  // Estados de UI
   const [savingConfig, setSavingConfig] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -37,18 +38,16 @@ export default function AdminPanel() {
   const [populationStats, setPopulationStats] = useState<any>(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
-  // --- NUEVOS ESTADOS PARA FILTROS VISUALES ---
+  // Estados para filtros visuales
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'top' | 'worst'>('all');
 
-  // --- ESTADO PARA SISTEMA DE TAGS ---
+  // Estado para sistema de tags
   const [isInitializingTags, setIsInitializingTags] = useState(false);
 
   // --- 1. CARGA DE DATOS ---
   const fetchAll = async () => {
-    // setLoading(true); // Eliminado
     await Promise.all([fetchUsers(), fetchPendingRequests(), fetchConfig()]);
-    // setLoading(false); // Eliminado
   };
 
   useEffect(() => {
@@ -57,9 +56,45 @@ export default function AdminPanel() {
 
   const fetchUsers = async () => {
     try {
-      const q = await getDocs(collection(db, "users"));
-      setUsersList(q.docs.map(d => ({ uid: d.id, ...d.data() })));
-    } catch (e) { console.error(e); }
+      const [usersSnap, patientsSnap, prosSnap] = await Promise.all([
+        getDocs(collection(db, "users")),
+        getDocs(collection(db, "patients")),
+        getDocs(collection(db, "professionals"))
+      ]);
+
+      // Guardamos la lista de profesionales para el selector del Modal
+      const pros = prosSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+      setProfessionalsList(pros);
+
+      const prosMap = new Map(pros.map(p => [p.uid, p.fullName || p.displayName || 'Profesional']));
+
+      const registeredUsers = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+      const manualPatients = patientsSnap.docs.map(d => ({ 
+        uid: d.id, 
+        ...d.data(),
+        displayName: d.data().fullName || d.data().displayName || 'Sin Nombre',
+        isManual: d.data().isManual || false,
+        role: d.data().role || 'patient'
+      }));
+
+      const combined = [...registeredUsers];
+      manualPatients.forEach(p => {
+        if (!combined.find(u => u.uid === p.uid)) combined.push(p);
+      });
+
+      const finalData = combined.map(u => {
+        let profName = 'Sin asignar';
+        if (u.linkedProfessionalId) {
+          profName = prosMap.get(u.linkedProfessionalId) || 'Sin asignar';
+        } else if (u.careTeam) {
+          const firstProId = Object.keys(u.careTeam)[0];
+          if (firstProId) profName = prosMap.get(firstProId) || 'Sin asignar';
+        }
+        return { ...u, profName };
+      });
+
+      setUsersList(finalData);
+    } catch (e) { console.error("Error al cargar usuarios:", e); }
   };
 
   const fetchPendingRequests = async () => {
@@ -77,7 +112,7 @@ export default function AdminPanel() {
     } catch (e) { console.error(e); }
   };
 
-  // --- NUEVA LÓGICA: INTELIGENCIA GLOBAL ---
+  // --- LÓGICA: INTELIGENCIA GLOBAL ---
   const handleLoadGlobalAnalytics = async () => {
     setLoadingAnalytics(true);
     try {
@@ -86,20 +121,15 @@ export default function AdminPanel() {
             getDocs(collection(db, "assigned_routines"))
         ]);
 
-        // CORRECCIÓN APLICADA: Casting explícito a Assignment para evitar error de TypeScript
         const allTasks = [
           ...snapM.docs.map(d => ({ ...d.data(), id: d.id, type: 'mission' } as unknown as Assignment)),
           ...snapR.docs.map(d => ({ ...d.data(), id: d.id, type: 'routine' } as unknown as Assignment))
         ];
 
-        // Análisis de contenido (Un solo argumento)
         const contentStats = analyzeCatalogBatch(allTasks as any[]); 
-        
         let statsArray = Array.isArray(contentStats) ? contentStats : Object.values(contentStats);
-        // Orden por defecto: Popularidad
         statsArray.sort((a: any, b: any) => b.usageCount - a.usageCount); 
 
-        // Análisis poblacional
         const popStats = calculateAggregatedStats ? calculateAggregatedStats(usersList, allTasks) : {};
 
         setAnalyticsData(statsArray);
@@ -118,32 +148,21 @@ export default function AdminPanel() {
     setIsInitializingTags(true);
     try {
       const batch = writeBatch(db);
-
-      // Paso 1: Hacer un getDoc a la ruta system/tagsMetadata
       const metadataRef = doc(db, 'system', 'tagsMetadata');
       const metadataSnap = await getDoc(metadataRef);
 
-      // Paso 2: Si el documento NO existe, usar el batch para crearlo
       if (!metadataSnap.exists()) {
-        batch.set(metadataRef, {
-          psicologia_version: 1,
-          nutricion_version: 1,
-          lenguaje_version: 1
-        });
+        batch.set(metadataRef, { psicologia_version: 1, nutricion_version: 1, lenguaje_version: 1 });
       }
 
-      // Paso 3: Revisar/crear los documentos maestros de los diccionarios
       const dictRefs = [
         doc(db, 'tagsDictionaries', 'psicologia'),
         doc(db, 'tagsDictionaries', 'nutricion'),
         doc(db, 'tagsDictionaries', 'lenguaje')
       ];
 
-      dictRefs.forEach((ref) => {
-        batch.set(ref, { tags: [] }, { merge: true });
-      });
+      dictRefs.forEach((ref) => { batch.set(ref, { tags: [] }, { merge: true }); });
 
-      // Paso 4: Ejecutar el batch
       await batch.commit();
       alert("Sistema de Tags inicializado correctamente.");
     } catch (error) {
@@ -158,23 +177,14 @@ export default function AdminPanel() {
   const getFilteredStats = () => {
       if (!analyticsData) return [];
       let data = [...analyticsData];
-
-      // 1. Buscador
-      if (searchTerm) {
-          data = data.filter(d => d.title.toLowerCase().includes(searchTerm.toLowerCase()));
-      }
-
-      // 2. Modos de Filtro
+      if (searchTerm) data = data.filter(d => d.title.toLowerCase().includes(searchTerm.toLowerCase()));
       if (filterMode === 'top') {
-          // Ordenar por Éxito y tomar 5
           data.sort((a, b) => b.globalSuccessRate - a.globalSuccessRate);
           return data.slice(0, 5);
       } else if (filterMode === 'worst') {
-          // Ordenar por Abandono (mayor dropout primero) y tomar 5
           data.sort((a, b) => b.dropoutRate - a.dropoutRate);
           return data.slice(0, 5);
       } else {
-          // Modo 'all': Paginación implícita (solo mostramos 20 para no saturar)
           return data.slice(0, 20);
       }
   };
@@ -187,20 +197,13 @@ export default function AdminPanel() {
       alert("No hay datos para exportar. Carga la Inteligencia Global primero.");
       return;
     }
-
-    const headers = [
-      "ID_Referencia", "Título de Tarea", "Frecuencia (Uso)", 
-      "Tasa de Éxito Global (%)", "Tasa de Abandono (%)", "Carga Cognitiva Est."
-    ];
-
+    const headers = ["ID_Referencia", "Título de Tarea", "Frecuencia (Uso)", "Tasa de Éxito Global (%)", "Tasa de Abandono (%)", "Carga Cognitiva Est."];
     const csvRows = analyticsData.map((row: any) => {
       const safeTitle = row.title ? `"${row.title.replace(/"/g, '""')}"` : "Sin Título";
       return [
-        row.catalogId, safeTitle, row.usageCount,
-        row.globalSuccessRate.toFixed(2), row.dropoutRate.toFixed(2), row.workloadImpact
+        row.catalogId, safeTitle, row.usageCount, row.globalSuccessRate.toFixed(2), row.dropoutRate.toFixed(2), row.workloadImpact
       ].join(",");
     });
-
     const csvString = [headers.join(","), ...csvRows].join("\n");
     const blob = new Blob(["\uFEFF" + csvString], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -223,42 +226,93 @@ export default function AdminPanel() {
     } catch (e) { console.error(e); alert("Error al autorizar."); }
   };
 
-  const handleDelete = async (uid: string, role: string) => {
-    if (!window.confirm("¿Seguro que deseas eliminar este usuario y todos sus datos vinculados?")) return;
+  const handleDelete = async (user: any) => {
+    const { uid, role, isManual, displayName } = user;
+    const confirmMsg = isManual 
+      ? `¿Seguro que deseas eliminar al paciente manual "${displayName}" y sus datos vinculados?` 
+      : `¿Seguro que deseas eliminar todos los datos de Firestore de "${displayName}"?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    const batch = writeBatch(db);
     try {
-        if (role === 'pro') await deleteDoc(doc(db, "professionals", uid));
-        else if (role === 'patient' || role === 'user') try { await deleteDoc(doc(db, "patients", uid)); } catch (err) {}
-        await deleteDoc(doc(db, "users", uid));
-        alert("Usuario eliminado correctamente");
+        if (!isManual) batch.delete(doc(db, "users", uid));
+        if (role === 'pro') batch.delete(doc(db, "professionals", uid));
+        if (role === 'patient' || isManual) batch.delete(doc(db, "patients", uid));
+
+        await batch.commit();
+        alert("Registro eliminado correctamente.");
         fetchAll();
     } catch (e) { console.error(e); alert("Error al eliminar"); }
   };
 
+  // MODIFICADO: Pre-cargar el profesional actual al abrir el modal
   const handleEditClick = async (user: any) => {
-    let extraData = {};
+    let extraData: any = {};
+    let currentProId = user.linkedProfessionalId || (user.careTeam ? Object.keys(user.careTeam)[0] : '');
+
     try {
       if (user.role === 'pro') {
         const snap = await getDoc(doc(db, 'professionals', user.uid));
         if (snap.exists()) extraData = snap.data();
-      } else if (user.role === 'patient') {
+      } else if (user.role === 'patient' || user.isManual) {
         const snap = await getDoc(doc(db, 'patients', user.uid));
-        if (snap.exists()) extraData = snap.data();
+        if (snap.exists()) {
+            extraData = snap.data();
+            // Refinamos la obtención del profesional actual desde la BD
+            if (extraData.linkedProfessionalId) currentProId = extraData.linkedProfessionalId;
+            else if (extraData.careTeam) currentProId = Object.keys(extraData.careTeam)[0];
+        }
       }
     } catch (e) { console.log("No extra data found"); }
-    setEditForm({ ...user, ...extraData });
+    
+    setEditForm({ ...user, ...extraData, linkedProfessionalId: currentProId });
     setEditingUser(user);
   };
 
+  // MODIFICADO: Guardar la vinculación del profesional y el usuario
   const saveEdit = async () => {
     try {
-        await updateDoc(doc(db, "users", editingUser.uid), {
-            displayName: editForm.displayName, role: editForm.role, email: editForm.email
-        });
-        if (editForm.role === 'pro') {
-           const proRef = doc(db, "professionals", editingUser.uid);
-           await setDoc(proRef, { fullName: editForm.displayName, email: editForm.email }, { merge: true });
+        const isPatient = editForm.role === 'patient' || editingUser.isManual;
+        
+        // Objeto base de actualización para pacientes
+        const patientUpdates: any = {
+            fullName: editForm.displayName,
+            role: editForm.role, 
+            email: editForm.email
+        };
+
+        // Si es paciente y se seleccionó un profesional, actualizamos rutas
+        if (isPatient && editForm.linkedProfessionalId) {
+            patientUpdates.linkedProfessionalId = editForm.linkedProfessionalId;
+            // Actualizamos la ruta careTeam para que el profesional lo vea en su lista
+            patientUpdates[`careTeam.${editForm.linkedProfessionalId}.status`] = 'active';
         }
-        setEditingUser(null); alert("Usuario actualizado"); fetchAll();
+
+        if (editingUser.isManual) {
+            // Es un paciente manual (sólo existe en patients)
+            await updateDoc(doc(db, "patients", editingUser.uid), patientUpdates);
+        } else {
+            // Es un usuario registrado
+            await updateDoc(doc(db, "users", editingUser.uid), {
+                displayName: editForm.displayName, role: editForm.role, email: editForm.email
+            });
+
+            if (isPatient) {
+                // Hacemos un setDoc con merge en caso de que sea un usuario recién registrado 
+                // que aún no tiene documento en la colección patients
+                await setDoc(doc(db, "patients", editingUser.uid), patientUpdates, { merge: true });
+            }
+
+            if (editForm.role === 'pro') {
+               const proRef = doc(db, "professionals", editingUser.uid);
+               await setDoc(proRef, { fullName: editForm.displayName, email: editForm.email }, { merge: true });
+            }
+        }
+        
+        setEditingUser(null); 
+        alert("Usuario y vinculaciones actualizadas"); 
+        fetchAll();
     } catch (e) { console.error(e); alert("Error al actualizar"); }
   };
 
@@ -301,52 +355,182 @@ export default function AdminPanel() {
     fontWeight: 'bold', fontSize: '14px'
   });
 
+  const modalInputStyle = {
+    width:'100%', 
+    padding:'10px', 
+    marginTop: '6px',
+    border: '1px solid #334155',
+    borderRadius: '6px',
+    color: '#fff',
+    boxSizing: 'border-box' as const,
+    background: '#0B1121',
+    outline: 'none',
+    fontSize: '14px'
+  };
+
   return (
-    <div style={{ padding: '20px', fontFamily:'sans-serif', position:'relative', background:'#F5F7FA', minHeight:'100vh' }}>
+    <div style={{ padding: '20px', fontFamily:'sans-serif', position:'relative', background:'#0B1121', minHeight:'100vh', color: '#fff' }}>
      
-      {/* HEADER */}
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px'}}>
-        <h2 style={{color:'#263238', margin:0}}>Panel de Administración</h2>
-        <div style={{display:'flex', gap:'10px'}}>
+      {/* HEADER DINÁMICO */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+        <h2 style={{ color: '#00E5FF', margin: 0, textTransform: 'uppercase', letterSpacing: '2px' }}>
+          Panel de Control Nexus
+        </h2>
+        <div style={{ display: 'flex', gap: '15px' }}>
           <button 
             onClick={handleInitializeTagsSystem} 
             disabled={isInitializingTags}
             style={{padding:'8px 15px', background:'#FF9800', color:'white', border:'none', borderRadius:'4px', cursor: isInitializingTags ? 'not-allowed' : 'pointer', fontWeight:'bold'}}
           >
-            {isInitializingTags ? 'Inicializando...' : 'Inicializar Sistema de Tags'}
+            {isInitializingTags ? 'Inicializando...' : 'Inicializar Sistema Tags'}
           </button>
-          <button onClick={() => auth.signOut()} style={{padding:'8px 15px', background:'#f44336', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>Cerrar Sesión</button>
+          <button onClick={() => auth.signOut()} style={{ background: '#f44336', color: 'white', border: 'none', borderRadius: '4px', padding: '10px 20px', cursor: 'pointer' }}>Cerrar Sesión</button>
         </div>
       </div>
      
-      {/* NAVEGACIÓN */}
-      <div style={{ marginBottom: '20px', display:'flex', gap:'10px', flexWrap:'wrap' }}>
-        <button onClick={() => setActiveTab('users')} style={btnStyle(activeTab === 'users')}>👥 Usuarios</button>
-        <button onClick={() => setActiveTab('requests')} style={btnStyle(activeTab === 'requests')}>📩 Solicitudes</button>
-        <button onClick={() => setActiveTab('catalog')} style={btnStyle(activeTab === 'catalog')}>📚 Catálogo</button>
-        <button onClick={() => setActiveTab('economy')} style={btnStyle(activeTab === 'economy')}>💎 Economía</button>
-        <button onClick={() => setActiveTab('config')} style={btnStyle(activeTab === 'config')}>⚙️ Config</button>
-        <button onClick={() => setActiveTab('bulk')} style={{...btnStyle(activeTab === 'bulk'), background: activeTab === 'bulk' ? '#673AB7' : '#ddd', color: activeTab === 'bulk' ? 'white' : 'black'}}>📦 Carga Masiva</button>
-        <button onClick={() => { setActiveTab('analytics'); handleLoadGlobalAnalytics(); }} style={{...btnStyle(activeTab === 'analytics'), background: activeTab === 'analytics' ? '#009688' : '#ddd', color: activeTab === 'analytics' ? 'white' : 'black'}}>📈 Inteligencia Global</button>
+      {/* NAVEGACIÓN ESTILO TABS */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '30px', flexWrap: 'wrap' }}>
+        {[
+          { id: 'users', label: '👥 Usuarios' },
+          { id: 'requests', label: '📩 Solicitudes' },
+          { id: 'catalog', label: '📚 Catálogo' },
+          { id: 'economy', label: '💎 Economía' },
+          { id: 'config', label: '⚙️ Config' },
+          { id: 'bulk', label: '📦 Carga Masiva' },
+          { id: 'analytics', label: '📈 Inteligencia Global' }
+        ].map((tab) => (
+          <button 
+            key={tab.id}
+            onClick={() => {
+              setActiveTab(tab.id as any);
+              if (tab.id === 'analytics') {
+                handleLoadGlobalAnalytics();
+              }
+            }}
+            style={{
+              padding: '10px 20px', borderRadius: '4px', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px',
+              background: activeTab === tab.id ? '#00E5FF' : '#151E32',
+              color: activeTab === tab.id ? '#0B1121' : '#94A3B8'
+            }}
+          >
+            {tab.label.toUpperCase()}
+          </button>
+        ))}
       </div>
 
-      <hr style={{borderColor:'#ddd', marginBottom:'20px'}} />
+      <hr style={{borderColor:'#334155', marginBottom:'20px'}} />
 
-      {/* MODAL EDIT USER */}
+      {/* --- MODAL EDIT USER (REDISEÑADO TEMA CYBER) --- */}
       {editingUser && (
-        <div style={{position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(0,0,0,0.5)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:1000}}>
-            <div style={{background:'white', padding:'25px', borderRadius:'8px', width:'400px', maxWidth:'90%'}}>
-                <h3>Editar Usuario</h3>
-                <label style={{display:'block', marginBottom:'10px'}}>Nombre: <input type="text" value={editForm.displayName||''} onChange={e=>setEditForm({...editForm, displayName:e.target.value})} style={{width:'100%', padding:'8px'}}/></label>
-                <label style={{display:'block', marginBottom:'10px'}}>Email: <input type="text" value={editForm.email||''} onChange={e=>setEditForm({...editForm, email:e.target.value})} style={{width:'100%', padding:'8px'}}/></label>
-                <label style={{display:'block', marginBottom:'20px'}}>Rol: 
-                    <select value={editForm.role||'user'} onChange={e=>setEditForm({...editForm, role:e.target.value})} style={{width:'100%', padding:'8px'}}>
-                        <option value="user">Usuario</option><option value="pro">Profesional</option><option value="admin">Admin</option>
+        <div style={{position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(11, 17, 33, 0.8)', backdropFilter:'blur(4px)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:1000}}>
+            <div style={{
+                background:'#151E32', 
+                padding:'30px', 
+                borderRadius:'12px', 
+                width:'400px', 
+                maxWidth:'90%',
+                border: '1px solid #334155',
+                boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+                color: '#fff'
+            }}>
+                <h3 style={{
+                    color:'#00E5FF', 
+                    marginTop: 0, 
+                    borderBottom: '1px solid #334155', 
+                    paddingBottom: '15px', 
+                    marginBottom: '20px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '1px'
+                }}>✏️ Editar Usuario</h3>
+                
+                <label style={{display:'block', marginBottom:'15px', color: '#94A3B8', fontSize:'13px'}}>
+                    Nombre Completo: 
+                    <input 
+                        type="text" 
+                        value={editForm.displayName||''} 
+                        onChange={e=>setEditForm({...editForm, displayName:e.target.value})} 
+                        style={modalInputStyle}
+                    />
+                </label>
+
+                <label style={{display:'block', marginBottom:'15px', color: '#94A3B8', fontSize:'13px'}}>
+                    Correo Electrónico: 
+                    <input 
+                        type="text" 
+                        value={editForm.email||''} 
+                        onChange={e=>setEditForm({...editForm, email:e.target.value})} 
+                        style={modalInputStyle}
+                    />
+                </label>
+
+                <label style={{display:'block', marginBottom:'20px', color: '#94A3B8', fontSize:'13px'}}>
+                    Rol de Sistema: 
+                    <select 
+                        value={editForm.role||'user'} 
+                        onChange={e=>setEditForm({...editForm, role:e.target.value})} 
+                        style={{...modalInputStyle, cursor: 'pointer'}}
+                    >
+                        <option value="user">Usuario Común</option>
+                        <option value="patient">Paciente</option>
+                        <option value="pro">Profesional</option>
+                        <option value="admin">Administrador</option>
                     </select>
                 </label>
-                <div style={{display:'flex', justifyContent:'flex-end', gap:'10px'}}>
-                    <button onClick={()=>setEditingUser(null)} style={{padding:'8px', background:'#ddd', border:'none', borderRadius:'4px'}}>Cancelar</button>
-                    <button onClick={saveEdit} style={{padding:'8px', background:'#2196F3', color:'white', border:'none', borderRadius:'4px'}}>Guardar</button>
+
+                {/* NUEVO: Selector de Profesional (Sólo visible para pacientes) */}
+                {(editForm.role === 'patient' || editingUser?.isManual) && (
+                    <div style={{background:'#0B1121', padding:'15px', borderRadius:'8px', border:'1px solid #334155', marginBottom:'25px'}}>
+                        <label style={{display:'block', color: '#00E5FF', fontSize:'13px', fontWeight:'bold', marginBottom:'5px'}}>
+                            🩺 Vincular a Profesional: 
+                        </label>
+                        <select 
+                            value={editForm.linkedProfessionalId || ''} 
+                            onChange={e=>setEditForm({...editForm, linkedProfessionalId:e.target.value})} 
+                            style={{...modalInputStyle, background:'#151E32', border:'1px solid #00E5FF'}}
+                        >
+                            <option value="">-- Sin Asignar --</option>
+                            {professionalsList.map(pro => (
+                                <option key={pro.uid} value={pro.uid}>
+                                    {pro.fullName || pro.displayName || 'Profesional Sin Nombre'}
+                                </option>
+                            ))}
+                        </select>
+                        <div style={{fontSize:'11px', color:'#64748B', marginTop:'8px'}}>
+                            Esto integrará al paciente en la agenda del profesional.
+                        </div>
+                    </div>
+                )}
+
+                <div style={{display:'flex', justifyContent:'flex-end', gap:'15px', marginTop: '10px'}}>
+                    <button 
+                        onClick={()=>setEditingUser(null)} 
+                        style={{
+                            padding:'10px 20px', 
+                            background:'#1E293B', 
+                            color:'#94A3B8', 
+                            border:'none', 
+                            borderRadius:'6px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Cancelar
+                    </button>
+                    <button 
+                        onClick={saveEdit} 
+                        style={{
+                            padding:'10px 20px', 
+                            background:'#00E5FF', 
+                            color:'#0B1121', 
+                            border:'none', 
+                            borderRadius:'6px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 10px rgba(0, 229, 255, 0.2)'
+                        }}
+                    >
+                        Guardar Cambios
+                    </button>
                 </div>
             </div>
         </div>
@@ -356,14 +540,14 @@ export default function AdminPanel() {
 
       {activeTab === 'config' && (
         <div style={{background:'white', padding:'20px', borderRadius:'8px', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
-          <h3>Configuración Global</h3>
-          <label>Link App: <input value={globalConfig.appDownloadLink} onChange={e => setGlobalConfig({...globalConfig, appDownloadLink: e.target.value})} style={{width:'100%', padding:'8px'}}/></label>
+          <h3 style={{color: 'black'}}>Configuración Global</h3>
+          <label style={{color: 'black'}}>Link App: <input value={globalConfig.appDownloadLink} onChange={e => setGlobalConfig({...globalConfig, appDownloadLink: e.target.value})} style={{width:'100%', padding:'8px'}}/></label>
           <button onClick={saveConfig} disabled={savingConfig} style={{marginTop:'10px', padding:'10px', background:'#4CAF50', color:'white', border:'none', borderRadius:'4px'}}>{savingConfig ? '...' : 'Guardar'}</button>
         </div>
       )}
 
       {activeTab === 'requests' && (
-         <table border={1} style={{width:'100%', borderCollapse:'collapse', background:'white'}}>
+         <table border={1} style={{width:'100%', borderCollapse:'collapse', background:'white', color: 'black'}}>
            <thead><tr style={{background:'#fff3e0'}}><th>Nombre</th><th>Email</th><th>Acción</th></tr></thead>
             <tbody>
             {pendingPros.map(p => (
@@ -377,33 +561,64 @@ export default function AdminPanel() {
          </table>
       )}
 
-{activeTab === 'users' && (
-    <div style={{background:'white', borderRadius:'8px', overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
-        <table style={{width:'100%', borderCollapse:'collapse'}}>
-        <thead>
-            <tr style={{
-                background:'#f5f5f5', 
-                textAlign:'left', 
-                color: '#0D47A1' 
-            }}>
-                <th style={{padding:'12px'}}>Usuario</th>
-                <th style={{padding:'12px'}}>Rol</th>
-                <th style={{padding:'12px'}}>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            {usersList.map(u => (
-                <tr key={u.uid} style={{borderBottom:'1px solid #eee'}}>
-                <td style={{padding:'12px'}}><strong>{u.displayName}</strong><br/><small style={{color:'#666'}}>{u.email}</small></td>
-                <td style={{padding:'12px'}}><span style={{padding:'4px 8px', borderRadius:'12px', background:u.role==='pro'?'#E3F2FD':'#F3E5F5', color:u.role==='pro'?'#1565C0':'#7B1FA2', fontSize:'12px', fontWeight:'bold'}}>{u.role}</span></td>
-                <td style={{padding:'12px'}}>
-                    <button onClick={() => handleEditClick(u)} style={{marginRight:'5px', cursor:'pointer', border:'none', background:'none'}}>✏️</button>
-                    {u.role !== 'admin' && <button onClick={() => handleDelete(u.uid, u.role)} style={{color:'red', cursor:'pointer', border:'none', background:'none'}}>🗑</button>}
-                </td>
-                </tr>
+      {activeTab === 'users' && (
+        <div style={{ background: '#0B1121', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 10px rgba(0,0,0,0.2)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
+            <h3 style={{ margin: 0, color: '#00E5FF', textTransform: 'uppercase', letterSpacing: '1px' }}>Directorio Global</h3>
+            <input 
+              placeholder="Buscar por nombre o correo..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{ padding: '10px 20px', borderRadius: '30px', border: '1px solid #334155', background: '#151E32', color: '#fff', width: '300px' }}
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+            {usersList.filter(u => u.displayName?.toLowerCase().includes(searchTerm.toLowerCase()) || u.email?.toLowerCase().includes(searchTerm.toLowerCase())).map(u => (
+              <div key={u.uid} style={{ 
+                background: '#151E32', border: '1px solid #334155', borderRadius: '12px', padding: '20px', position: 'relative'
+              }}>
+                <div style={{ position: 'absolute', top: '15px', right: '15px', display: 'flex', gap: '10px' }}>
+                  <button onClick={() => handleEditClick(u)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="Editar">✏️</button>
+                  {u.role !== 'admin' && (
+                    <button onClick={() => handleDelete(u)} style={{ background: 'none', border: 'none', color: '#FF5252', cursor: 'pointer', fontSize: '16px' }} title="Eliminar">🗑</button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '15px' }}>
+                  <div style={{ 
+                    width: '50px', height: '50px', borderRadius: '50%', background: '#1E293B',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 'bold', color: '#94A3B8'
+                  }}>
+                    {u.displayName?.charAt(0)?.toUpperCase() || '?'}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 'bold', fontSize: '16px', color: '#00E5FF' }}>{u.displayName}</div>
+                    <div style={{ fontSize: '12px', color: '#94A3B8' }}>{u.email || 'Sin correo asociado'}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
+                  <span style={{ padding: '4px 10px', borderRadius: '12px', background: u.role === 'pro' ? 'rgba(33, 150, 243, 0.15)' : 'rgba(156, 39, 176, 0.15)', color: u.role === 'pro' ? '#64B5F6' : '#CE93D8', fontSize: '11px', fontWeight: 'bold', border: `1px solid ${u.role === 'pro' ? '#1976D2' : '#8E24AA'}` }}>
+                    {u.role?.toUpperCase() || 'PACIENTE'}
+                  </span>
+                  {u.isManual && (
+                    <span style={{ padding: '4px 10px', borderRadius: '12px', background: 'rgba(255, 152, 0, 0.15)', color: '#FFB74D', fontSize: '11px', fontWeight: 'bold', border: '1px solid #F57C00' }}>
+                      📝 MANUAL
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ borderTop: '1px solid #334155', paddingTop: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span style={{ display: 'block', fontSize: '10px', color: '#64748B', textTransform: 'uppercase', marginBottom: '4px' }}>Profesional a cargo</span>
+                    <span style={{ fontSize: '13px', color: '#E2E8F0', fontWeight: 'bold' }}>🩺 {u.profName}</span>
+                  </div>
+                </div>
+              </div>
             ))}
-            </tbody>
-            </table>
+          </div>
+          {usersList.length === 0 && <div style={{ color: '#94A3B8', textAlign: 'center', padding: '40px' }}>No se encontraron usuarios...</div>}
         </div>
       )}
      
@@ -415,7 +630,6 @@ export default function AdminPanel() {
       {activeTab === 'analytics' && (
         <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
             
-            {/* CABECERA CON BOTÓN DE DESCARGA */}
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                <h3 style={{color:'#37474F', margin:0}}>📊 Panel de Inteligencia</h3>
                <button onClick={handleExportCSV} disabled={loadingAnalytics || !analyticsData}
@@ -434,23 +648,20 @@ export default function AdminPanel() {
 
             {!loadingAnalytics && analyticsData && (
                 <>
-                    {/* SECCIÓN 1: KPIS SUPERIORES */}
-                    <div style={{display:'flex', gap:'15px', flexWrap:'wrap'}}>
+                    <div style={{display:'flex', gap:'15px', flexWrap:'wrap', color: 'black'}}>
                         <StatCard title="Total Usuarios" value={usersList.length} color="#607D8B" icon="👥" />
-                        <StatCard title="Pacientes Activos" value={usersList.filter(u => u.role === 'patient').length} color="#4CAF50" icon="❤️" />
+                        <StatCard title="Pacientes Activos" value={usersList.filter(u => u.role === 'patient' || u.isManual).length} color="#4CAF50" icon="❤️" />
                         <StatCard title="Profesionales" value={usersList.filter(u => u.role === 'pro').length} color="#2196F3" icon="🩺" />
                         <StatCard title="Tareas Asignadas" value={analyticsData.reduce((acc:any, curr:any) => acc + curr.usageCount, 0)} color="#FF9800" icon="📝" />
                     </div>
 
-                    <div style={{display:'grid', gridTemplateColumns:'1.5fr 1fr', gap:'20px'}}>
+                    <div style={{display:'grid', gridTemplateColumns:'1.5fr 1fr', gap:'20px', color: 'black'}}>
                         
-                        {/* SECCIÓN 2: RENDIMIENTO DEL CATÁLOGO (TABLA FILTRABLE) */}
                         <div style={{background:'white', padding:'20px', borderRadius:'8px', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
                             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px', borderBottom:'2px solid #009688', paddingBottom:'10px'}}>
                                 <h4 style={{margin:0, color:'#37474F'}}>🏆 Rendimiento del Contenido</h4>
                             </div>
 
-                            {/* CONTROLES DE FILTRO */}
                             <div style={{display:'flex', gap:'10px', marginBottom:'15px', background:'#f9f9f9', padding:'10px', borderRadius:'6px'}}>
                                 <input 
                                     placeholder="🔍 Buscar tarea..." 
@@ -508,10 +719,8 @@ export default function AdminPanel() {
                             )}
                         </div>
 
-                        {/* SECCIÓN 3: SALUD POBLACIONAL */}
                         <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
                             
-                            {/* Ritmos Circadianos */}
                             <div style={{background:'white', padding:'20px', borderRadius:'8px', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
                                 <h4 style={{marginTop:0, color:'#37474F', marginBottom:'15px'}}>⏰ Ritmo Circadiano</h4>
                                 {populationStats?.timeOfDayStats ? (
@@ -523,7 +732,6 @@ export default function AdminPanel() {
                                 ) : <p style={{color:'#999', fontSize:'13px'}}>Sin datos.</p>}
                             </div>
 
-                            {/* Distribución Semanal */}
                             <div style={{background:'white', padding:'20px', borderRadius:'8px', boxShadow:'0 1px 3px rgba(0,0,0,0.1)', flex:1}}>
                                 <h4 style={{marginTop:0, color:'#37474F', marginBottom:'15px'}}>📅 Semana Tipo</h4>
                                 {populationStats?.byCategory?.General?.dayDistribution ? (

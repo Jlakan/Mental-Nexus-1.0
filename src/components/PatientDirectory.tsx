@@ -34,22 +34,39 @@ export default function PatientDirectory({
       );
     }
 
-    // 2. Filtros Rápidos
+    // 2. Filtros Rápidos (CORREGIDOS)
     const now = new Date();
+    
     if (activeFilter === 'upcoming_appt') {
+      // PACIENTES CON CITA FUTURA
       result = result.filter(p => {
         const apptStr = p.careTeam?.[professionalId]?.nextAppointment;
         if (!apptStr) return false;
         return new Date(apptStr) > now;
       });
-    } else if (activeFilter === 'needs_attention') {
+    } 
+    else if (activeFilter === 'no_appt') {
+      // NUEVO: PACIENTES SIN CITA FUTURA (No tienen cita, o la que tienen ya pasó)
       result = result.filter(p => {
-        // Consideramos "atención requerida" si no tiene asistencia en más de 7 días
+        const apptStr = p.careTeam?.[professionalId]?.nextAppointment;
+        return !apptStr || new Date(apptStr) <= now;
+      });
+    } 
+    else if (activeFilter === 'needs_attention') {
+      // PACIENTES QUE REQUIEREN ATENCIÓN (Ausentes > 7 días)
+      result = result.filter(p => {
+        // MEJORA: Si ya tienen una cita programada en el futuro, no requieren atención urgente (ya están agendados)
+        const apptStr = p.careTeam?.[professionalId]?.nextAppointment;
+        if (apptStr && new Date(apptStr) > now) return false;
+
+        // Verificamos si no ha venido en más de 7 días
         if (!p.lastAttendance?.[professionalId]) return true; // Nunca ha tenido asistencia
+        
         const lastAtt = p.lastAttendance[professionalId].toDate 
           ? p.lastAttendance[professionalId].toDate() 
           : new Date(p.lastAttendance[professionalId]);
-        const daysSince = Math.abs(now.getTime() - lastAtt.getTime()) / (1000 * 3600 * 24);
+          
+        const daysSince = (now.getTime() - lastAtt.getTime()) / (1000 * 3600 * 24);
         return daysSince > 7;
       });
     }

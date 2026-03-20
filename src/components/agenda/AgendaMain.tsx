@@ -126,7 +126,6 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
   const [isEventsManagerOpen, setIsEventsManagerOpen] = useState(false);
   const [isNewEventModalOpen, setIsNewEventModalOpen] = useState(false);
 
-  // ESTADO PARA DETALLE DE ESPERA (CORRECCIÓN SOLICITADA)
   const [selectedWaitlistEntry, setSelectedWaitlistEntry] = useState<any | null>(null);
   const [isWaitlistDetailOpen, setIsWaitlistDetailOpen] = useState(false);
 
@@ -564,20 +563,24 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
+  // --- CORRECCIÓN DE SINCRONIZACIÓN DE PACIENTES ---
   const handleSyncPatients = async () => {
-    if (!window.confirm("¿Sincronizar expedientes?\n\nEsto escaneará la agenda actual para detectar citas y sacará a los pacientes correctos de la lista 'Sin Cita'.")) return;
+    if (!window.confirm("¿Sincronizar expedientes?\n\nEsto escaneará tu agenda a partir de HOY para detectar citas y actualizará a los pacientes 'Sin Cita' correctamente.")) return;
     setLoading(true);
     try {
       const now = new Date();
-      const year = selectedDate.getFullYear();
-      const month = selectedDate.getMonth();
-      
-      const monthsToCheck = [
-        `${year}_${month.toString().padStart(2, '0')}`,
-        `${month === 11 ? year + 1 : year}_${((month + 1) % 12).toString().padStart(2, '0')}`
-      ];
+      const currentRealYear = now.getFullYear();
+      const currentRealMonth = now.getMonth();
 
-      const futureAppointments = new Map<string, Date>(); 
+      // Generamos los próximos 6 meses a partir del día de HOY, 
+      // ignorando en qué mes esté la agenda visualmente en este momento.
+      const monthsToCheck = [];
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(currentRealYear, currentRealMonth + i, 1);
+        monthsToCheck.push(`${d.getFullYear()}_${d.getMonth().toString().padStart(2, '0')}`);
+      }
+
+      const futureAppointments = new Map<string, Date>();
 
       for (const mId of monthsToCheck) {
         const docSnap = await getDoc(doc(db, "professionals", selectedProfId, "availability", mId));
@@ -616,7 +619,7 @@ export default function AgendaMain({ userRole, currentUserId, onBack, doctorId }
             });
             updatesCount++;
           }
-        } 
+        }
         else if (currentNextAppt && currentNextAppt > now) {
             batch.update(doc(db, "patients", p.id), {
               [`careTeam.${selectedProfId}.nextAppointment`]: null,

@@ -1,7 +1,7 @@
 // src/components/AdminBulkTools.tsx
 
 import { useState } from 'react';
-import { collection, writeBatch, doc, getDocs, serverTimestamp } from "firebase/firestore";
+import { collection, writeBatch, doc, getDocs, getDoc, serverTimestamp } from "firebase/firestore"; 
 import { db } from '../services/firebase';
 import type { CsvTagRow, CsvTaskRow } from '../types/BulkTypes';
 
@@ -38,16 +38,15 @@ export default function AdminBulkTools() {
   const processTagsCsv = async (csvText: string) => {
     setLoading(true);
     setLogs([]);
-    addLog("Iniciando carga de Tags...");
+    setProgress(0);
+    addLog("Iniciando generación de paquete de Tags...");
     console.log("=== INICIO PROCESO DE TAGS ===");
     
     try {
-      // FIX: Remover BOM y manejar saltos de línea universales
       const cleanText = csvText.replace(/^\uFEFF/, '');
       const lines = cleanText.split(/\r?\n/).filter(l => l.trim() !== '');
       console.log(`[CSV] Total de líneas detectadas: ${lines.length}`);
 
-      // CORRECCIÓN 1: Usamos ';' como delimitador para evitar romper descripciones con comas
       const headers = lines[0].split(';').map(h => h.trim().toLowerCase());
       console.log("[CSV] Cabeceras detectadas:", headers);
       
@@ -55,73 +54,60 @@ export default function AdminBulkTools() {
         throw new Error(`El CSV debe tener cabeceras: categoria; etiqueta; sinonimos. Encontradas: ${headers.join(', ')}`);
       }
 
-      addLog("Descargando mapa de tags existentes...");
-      const existingTagsMap = new Map<string, boolean>();
-      const querySnap = await getDocs(collection(db, "tags"));
-      querySnap.forEach(doc => {
-        const data = doc.data();
-        const key = normalizeKey(`${data.category}_${data.label}`);
-        existingTagsMap.set(key, true);
-      });
+      const professionInput = window.prompt("Ingresa la profesión para este diccionario (ej. psicologia, nutricion):", "psicologia");
+      if (!professionInput) {
+        addLog("⚠️ Carga cancelada: Se requiere una profesión.");
+        setLoading(false);
+        return;
+      }
+      const normalizedProf = normalizeKey(professionInput);
 
-      let batch = writeBatch(db);
-      let opCount = 0;
-      let addedCount = 0;
+      const tagsArray = [];
 
       for (let i = 1; i < lines.length; i++) {
-        // CORRECCIÓN 1: Split por punto y coma
         const row = lines[i].split(';');
         if (row.length < 2) {
           console.warn(`[CSV] Fila ${i + 1} ignorada (menos de 2 columnas):`, lines[i]);
           continue;
         }
 
-        const tagData: CsvTagRow = {
-          categoria: row[0]?.trim() || '',
-          etiqueta: row[1]?.trim() || '',
-          sinonimos: row[2]?.trim() || ''
+        const tagData = {
+          category: row[0]?.trim() || 'General',
+          masterTag: row[1]?.trim() || '',
+          synonyms: row[2]?.trim() ? row[2].split(',').map(s => s.trim().toLowerCase()).filter(s => s) : []
         };
 
-        const uniqueKey = normalizeKey(`${tagData.categoria}_${tagData.etiqueta}`);
-
-        if (existingTagsMap.has(uniqueKey)) {
-          addLog(`⏭️ Saltando duplicado: ${tagData.etiqueta}`);
-          continue;
+        if (tagData.masterTag) {
+          tagsArray.push(tagData);
         }
-
-        const newTagRef = doc(collection(db, "tags"));
-        batch.set(newTagRef, {
-          category: tagData.categoria,
-          label: tagData.etiqueta,
-          // FIX: Validación segura para evitar fallos si sinónimos viene vacío
-          keywords: tagData.sinonimos ? tagData.sinonimos.split(',').map(s => s.trim().toLowerCase()).filter(s => s) : [],
-          createdAt: serverTimestamp()
-        });
-
-        existingTagsMap.set(uniqueKey, true);
-        opCount++;
-        addedCount++;
-
-        if (opCount >= 450) {
-          console.log(`[FIREBASE] Ejecutando commit intermedio. Operaciones en lote: ${opCount}`);
-          addLog("💾 Guardando lote intermedio...");
-          await batch.commit();
-          batch = writeBatch(db);
-          opCount = 0;
-        }
-        setProgress(Math.round((i / lines.length) * 100));
+        
+        setProgress(Math.round((i / lines.length) * 50));
       }
 
-      console.log(`[FIREBASE] Proceso terminado. Documentos nuevos listos para subir: ${addedCount}`);
-      if (opCount > 0) {
-        await batch.commit();
-      } else if (addedCount === 0) {
-        addLog("⚠️ No se subió ningún tag nuevo (todos eran duplicados o vacíos).");
-      }
+      addLog(`📦 Paquete preparado con ${tagsArray.length} etiquetas.`);
+
+      const batch = writeBatch(db);
+
+      const dictionaryRef = doc(db, 'tagsDictionaries', normalizedProf);
+      batch.set(dictionaryRef, { 
+        tags: tagsArray,
+        updatedAt: serverTimestamp() 
+      });
+
+      const metadataRef = doc(db, 'system', 'tagsMetadata');
+      const metaSnap = await getDoc(metadataRef);
+      const currentVersion = metaSnap.exists() ? (metaSnap.data()[`${normalizedProf}_version`] || 0) : 0;
+      const newVersion = currentVersion + 1;
+
+      batch.set(metadataRef, { 
+        [`${normalizedProf}_version`]: newVersion 
+      }, { merge: true });
+
+      addLog(`💾 Subiendo a Firestore y actualizando a v${newVersion}...`);
+      await batch.commit();
       
-      if (addedCount > 0) {
-        addLog(`✅ Finalizado: ${addedCount} tags nuevos.`);
-      }
+      setProgress(100);
+      addLog(`✅ ¡Éxito! Diccionario "${normalizedProf}" guardado con ${tagsArray.length} tags.`);
 
     } catch (error: any) {
       addLog(`❌ Error: ${error.message}`);
@@ -131,7 +117,7 @@ export default function AdminBulkTools() {
     }
   };
 
-  // --- PROCESADOR 2: TAREAS (CORREGIDO) ---
+  // --- PROCESADOR 2: TAREAS ---
   const processTasksCsv = async (csvText: string) => {
     setLoading(true);
     setLogs([]);
@@ -139,7 +125,6 @@ export default function AdminBulkTools() {
     console.log("=== INICIO PROCESO DE TAREAS ===");
 
     try {
-      // FIX: Remover BOM y manejar saltos de línea universales
       const cleanText = csvText.replace(/^\uFEFF/, '');
       const lines = cleanText.split(/\r?\n/).filter(l => l.trim() !== '');
       console.log(`[CSV] Total de líneas detectadas: ${lines.length}`);
@@ -147,7 +132,6 @@ export default function AdminBulkTools() {
       addLog("Analizando estructura actual...");
       const structureMap = new Map<string, string>(); 
 
-      // Cargar estructura existente (Profesiones -> Categorias -> Subcategorias)
       const profSnap = await getDocs(collection(db, "professions"));
       for (const pDoc of profSnap.docs) {
         structureMap.set(normalizeKey(pDoc.data().name), pDoc.id);
@@ -181,17 +165,14 @@ export default function AdminBulkTools() {
       };
 
       for (let i = 1; i < lines.length; i++) {
-        // CORRECCIÓN 1: Split por Punto y Coma (;)
         const cols = lines[i].split(';');
         if (cols.length < 4) {
           console.warn(`[CSV] Fila ${i + 1} ignorada (menos de 4 columnas):`, lines[i]);
           continue;
         }
 
-        // Mapeo ajustado. Asumimos orden: 
-        // 0: tipo, 1: profesion, 2: categoria, 3: subcat, 4: tarea, 5: desc, 6: tags, 7: edades
         const row: CsvTaskRow = {
-          tipo: cols[0]?.trim() || '',         // Ej: "rutina" o vacío
+          tipo: cols[0]?.trim() || '',         
           profesion: cols[1]?.trim() || '',
           categoria: cols[2]?.trim() || '',
           subcategoria: cols[3]?.trim() || '',
@@ -201,7 +182,6 @@ export default function AdminBulkTools() {
           edades: cols[7]?.trim() || ''
         };
 
-        // --- NIVEL 1: PROFESIÓN ---
         const profKey = normalizeKey(row.profesion);
         let profId = structureMap.get(profKey);
 
@@ -214,7 +194,6 @@ export default function AdminBulkTools() {
           addLog(`➕ Nueva Profesión: ${row.profesion}`);
         }
 
-        // --- NIVEL 2: CATEGORÍA ---
         const catKey = normalizeKey(`${row.profesion}_${row.categoria}`);
         let catId = structureMap.get(catKey);
         if (!catId) {
@@ -225,7 +204,6 @@ export default function AdminBulkTools() {
           await checkBatch();
         }
 
-        // --- NIVEL 3: SUBCATEGORÍA ---
         const subKey = normalizeKey(`${row.profesion}_${row.categoria}_${row.subcategoria}`);
         let subId = structureMap.get(subKey);
         if (!subId) {
@@ -236,9 +214,6 @@ export default function AdminBulkTools() {
           await checkBatch();
         }
 
-        // --- NIVEL 4: TAREA (CORRECCIONES APLICADAS) ---
-        
-        // Determinar colección basada en columna 'tipo'
         const isRoutine = row.tipo?.toLowerCase() === 'rutina' || row.tipo?.toLowerCase() === 'routine';
         const taskCollection = isRoutine ? "catalog_routines" : "catalog_missions";
         const typeLabel = isRoutine ? "Rutina" : "Misión";
@@ -248,16 +223,10 @@ export default function AdminBulkTools() {
         batch.set(newTaskRef, {
           title: row.tarea,
           description: row.descripcion,
-          
-          // CORRECCIÓN 2: Nombres de campos compatibles con AdminCatalogTree
-          // CORRECCIÓN 3: Conversión a Array usando pipe '|' (FIX: validación segura si viene vacío)
           targetAge: row.edades ? row.edades.split('|').map(s => s.trim()) : [], 
           tags: row.tags ? row.tags.split('|').map(s => s.trim()) : [],
-
           createdAt: serverTimestamp(),
-          tier: 'EASY', // Valor por defecto
-          
-          // Campos META para el Árbol
+          tier: 'EASY', 
           typeLabel: typeLabel,
           _collection: taskCollection
         });
@@ -287,41 +256,105 @@ export default function AdminBulkTools() {
   };
 
   return (
-    <div style={{ padding: '20px', background: '#f5f5f5', borderRadius: '8px' }}>
-      <h3>📦 Herramienta de Carga Masiva (v2.0)</h3>
+    <div style={{ padding: '25px', background: '#0B1121', borderRadius: '12px', color: '#fff', boxShadow: '0 4px 10px rgba(0,0,0,0.2)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
+        <h3 style={{ margin: 0, color: '#00E5FF', textTransform: 'uppercase', letterSpacing: '1px' }}>
+          📦 Herramienta de Carga Masiva (v2.0)
+        </h3>
+      </div>
       
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-        <button onClick={() => setActiveTab('tags')} style={{ padding: '10px 20px', background: activeTab === 'tags' ? '#2196F3' : '#ddd', color: activeTab === 'tags' ? 'white' : 'black', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+      <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
+        <button 
+          onClick={() => setActiveTab('tags')} 
+          style={{ 
+            padding: '12px 25px', 
+            background: activeTab === 'tags' ? '#00E5FF' : '#151E32', 
+            color: activeTab === 'tags' ? '#0B1121' : '#94A3B8', 
+            border: 'none', 
+            borderRadius: '6px', 
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            boxShadow: activeTab === 'tags' ? '0 4px 10px rgba(0, 229, 255, 0.2)' : 'none'
+          }}
+        >
           1. Importar Tags
         </button>
-        <button onClick={() => setActiveTab('tasks')} style={{ padding: '10px 20px', background: activeTab === 'tasks' ? '#2196F3' : '#ddd', color: activeTab === 'tasks' ? 'white' : 'black', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+        <button 
+          onClick={() => setActiveTab('tasks')} 
+          style={{ 
+            padding: '12px 25px', 
+            background: activeTab === 'tasks' ? '#00E5FF' : '#151E32', 
+            color: activeTab === 'tasks' ? '#0B1121' : '#94A3B8', 
+            border: 'none', 
+            borderRadius: '6px', 
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            boxShadow: activeTab === 'tasks' ? '0 4px 10px rgba(0, 229, 255, 0.2)' : 'none'
+          }}
+        >
           2. Importar Tareas
         </button>
       </div>
 
-      <div style={{ background: 'white', padding: '20px', borderRadius: '8px', border: '1px solid #ccc' }}>
-        <div style={{marginBottom: '15px', padding: '10px', background: '#fff3cd', borderLeft: '4px solid #ffc107', fontSize: '14px'}}>
-            <strong>⚠️ IMPORTANTE: Formato CSV</strong><br/>
-            Debido a que las descripciones pueden contener comas, el archivo <strong>DEBE</strong> estar delimitado por <strong>PUNTOS Y COMA (;)</strong>.<br/>
+      <div style={{ background: '#151E32', padding: '25px', borderRadius: '12px', border: '1px solid #334155' }}>
+        {/* ALERTA REDISEÑADA TEMA OSCURO */}
+        <div style={{
+            marginBottom: '20px', 
+            padding: '15px', 
+            background: 'rgba(255, 152, 0, 0.1)', 
+            borderLeft: '4px solid #FF9800', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            color: '#FFCC80',
+            lineHeight: '1.5'
+        }}>
+            <strong style={{ color: '#FF9800', display: 'block', marginBottom: '5px' }}>⚠️ IMPORTANTE: Formato CSV</strong>
+            Debido a que las descripciones pueden contener comas, el archivo <strong style={{color: '#fff'}}>DEBE</strong> estar delimitado por <strong style={{color: '#fff'}}>PUNTOS Y COMA (;)</strong>.<br/>
             <br/>
-            <strong>Cabeceras Tasks:</strong> tipo; profesion; categoria; subcategoria; tarea; descripcion; tags; edades
+            <span style={{ color: '#FF9800', fontWeight: 'bold' }}>Cabeceras Tasks:</span> <span style={{ fontFamily: 'monospace', color: '#fff' }}>tipo; profesion; categoria; subcategoria; tarea; descripcion; tags; edades</span>
         </div>
         
-        <input 
-          type="file" 
-          accept=".csv" 
-          onChange={handleFileUpload} 
-          disabled={loading}
-          style={{ marginBottom: '20px', display: 'block' }} 
-        />
+        {/* INPUT DE ARCHIVO REDISEÑADO */}
+        <div style={{ marginBottom: '25px' }}>
+            <input 
+              type="file" 
+              accept=".csv" 
+              onChange={handleFileUpload} 
+              disabled={loading}
+              style={{ 
+                display: 'block',
+                width: '100%',
+                padding: '12px',
+                background: '#0B1121',
+                border: '1px solid #334155',
+                borderRadius: '6px',
+                color: '#94A3B8',
+                cursor: loading ? 'not-allowed' : 'pointer'
+              }} 
+            />
+        </div>
 
         {loading && (
-          <div style={{ width: '100%', background: '#eee', height: '10px', borderRadius: '5px', marginBottom: '15px' }}>
-            <div style={{ width: `${progress}%`, background: '#4CAF50', height: '100%', borderRadius: '5px', transition: 'width 0.3s' }}></div>
+          <div style={{ width: '100%', background: '#0B1121', height: '12px', borderRadius: '6px', marginBottom: '20px', overflow: 'hidden', border: '1px solid #334155' }}>
+            <div style={{ width: `${progress}%`, background: '#00E5FF', height: '100%', borderRadius: '6px', transition: 'width 0.3s ease-out', boxShadow: '0 0 10px rgba(0, 229, 255, 0.5)' }}></div>
           </div>
         )}
 
-        <div style={{ background: '#222', color: '#0f0', padding: '15px', borderRadius: '4px', height: '200px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '12px' }}>
+        {/* CONSOLA DE LOGS ESTILO TERMINAL */}
+        <div style={{ 
+            background: '#000', 
+            color: '#00FF41', // Verde terminal clásico
+            padding: '20px', 
+            borderRadius: '8px', 
+            height: '250px', 
+            overflowY: 'auto', 
+            fontFamily: '"Courier New", Courier, monospace', 
+            fontSize: '13px',
+            border: '1px solid #334155',
+            lineHeight: '1.6'
+        }}>
           {logs.length === 0 ? '> Esperando archivo CSV (Delimitado por ;)...' : logs.map((l, i) => <div key={i}>{l}</div>)}
         </div>
       </div>
