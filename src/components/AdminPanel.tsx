@@ -55,7 +55,6 @@ export default function AdminPanel() {
         getDocs(collection(db, "professionals"))
       ]);
 
-      // SOLUCIÓN: Agregado "as any" para evitar errores de propiedades en TypeScript
       const pros = prosSnap.docs.map(d => ({ uid: d.id, ...d.data() } as any));
       setProfessionalsList(pros);
 
@@ -266,17 +265,24 @@ export default function AdminPanel() {
             email: editForm.email
         };
 
+        const userUpdates: any = {
+            displayName: editForm.displayName, 
+            role: editForm.role, 
+            email: editForm.email
+        };
+
         if (isPatient && editForm.linkedProfessionalId) {
             patientUpdates.linkedProfessionalId = editForm.linkedProfessionalId;
             patientUpdates[`careTeam.${editForm.linkedProfessionalId}.status`] = 'active';
+            
+            userUpdates.linkedProfessionalId = editForm.linkedProfessionalId;
+            userUpdates[`careTeam.${editForm.linkedProfessionalId}.status`] = 'active';
         }
 
         if (editingUser.isManual) {
             await updateDoc(doc(db, "patients", editingUser.uid), patientUpdates);
         } else {
-            await updateDoc(doc(db, "users", editingUser.uid), {
-                displayName: editForm.displayName, role: editForm.role, email: editForm.email
-            });
+            await updateDoc(doc(db, "users", editingUser.uid), userUpdates);
 
             if (isPatient) {
                 await setDoc(doc(db, "patients", editingUser.uid), patientUpdates, { merge: true });
