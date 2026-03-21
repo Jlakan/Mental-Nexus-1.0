@@ -1,7 +1,7 @@
 // src/components/AdminPanel.tsx
 import { useState, useEffect } from 'react';
 import {
-  collection, getDocs, doc, deleteDoc, updateDoc,
+  collection, getDocs, doc, updateDoc,
   getDoc, query, where, setDoc, writeBatch
 } from "firebase/firestore";
 import { db, auth } from '../services/firebase';
@@ -19,33 +19,26 @@ import { analyzeCatalogBatch } from '../utils/ClinicalEngine';
 import { calculateAggregatedStats } from '../utils/PopulationAnalytics';
 
 export default function AdminPanel() {
-  // Estado de navegación
   const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'catalog' | 'config' | 'economy' | 'bulk' | 'analytics'>('users');
   
-  // Estados de datos
   const [usersList, setUsersList] = useState<any[]>([]);
   const [pendingPros, setPendingPros] = useState<any[]>([]);
-  const [professionalsList, setProfessionalsList] = useState<any[]>([]); // NUEVO: Para el selector de asignación
+  const [professionalsList, setProfessionalsList] = useState<any[]>([]);
   const [globalConfig, setGlobalConfig] = useState({ appDownloadLink: '' });
   
-  // Estados de UI
   const [savingConfig, setSavingConfig] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editForm, setEditForm] = useState<any>({});
 
-  // Estados de Analítica Global
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [populationStats, setPopulationStats] = useState<any>(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
-  // Estados para filtros visuales
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'top' | 'worst'>('all');
 
-  // Estado para sistema de tags
   const [isInitializingTags, setIsInitializingTags] = useState(false);
 
-  // --- 1. CARGA DE DATOS ---
   const fetchAll = async () => {
     await Promise.all([fetchUsers(), fetchPendingRequests(), fetchConfig()]);
   };
@@ -62,20 +55,20 @@ export default function AdminPanel() {
         getDocs(collection(db, "professionals"))
       ]);
 
-      // Guardamos la lista de profesionales para el selector del Modal
-      const pros = prosSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+      // SOLUCIÓN: Agregado "as any" para evitar errores de propiedades en TypeScript
+      const pros = prosSnap.docs.map(d => ({ uid: d.id, ...d.data() } as any));
       setProfessionalsList(pros);
 
       const prosMap = new Map(pros.map(p => [p.uid, p.fullName || p.displayName || 'Profesional']));
 
-      const registeredUsers = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+      const registeredUsers = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() } as any));
       const manualPatients = patientsSnap.docs.map(d => ({ 
         uid: d.id, 
         ...d.data(),
         displayName: d.data().fullName || d.data().displayName || 'Sin Nombre',
         isManual: d.data().isManual || false,
         role: d.data().role || 'patient'
-      }));
+      } as any));
 
       const combined = [...registeredUsers];
       manualPatients.forEach(p => {
@@ -112,7 +105,6 @@ export default function AdminPanel() {
     } catch (e) { console.error(e); }
   };
 
-  // --- LÓGICA: INTELIGENCIA GLOBAL ---
   const handleLoadGlobalAnalytics = async () => {
     setLoadingAnalytics(true);
     try {
@@ -143,7 +135,6 @@ export default function AdminPanel() {
     }
   };
 
-  // --- LÓGICA: INICIALIZAR SISTEMA DE TAGS ---
   const handleInitializeTagsSystem = async () => {
     setIsInitializingTags(true);
     try {
@@ -173,7 +164,6 @@ export default function AdminPanel() {
     }
   };
 
-  // --- LÓGICA DE FILTRADO PARA LA TABLA ---
   const getFilteredStats = () => {
       if (!analyticsData) return [];
       let data = [...analyticsData];
@@ -191,7 +181,6 @@ export default function AdminPanel() {
 
   const displayedStats = getFilteredStats();
 
-  // --- FUNCIÓN DE EXPORTACIÓN A CSV ---
   const handleExportCSV = () => {
     if (!analyticsData || analyticsData.length === 0) {
       alert("No hay datos para exportar. Carga la Inteligencia Global primero.");
@@ -215,7 +204,6 @@ export default function AdminPanel() {
     document.body.removeChild(link);
   };
 
-  // --- LÓGICA DE ACCIONES ---
   const handleAuthorize = async (proUid: string) => {
     if (!window.confirm("¿Autorizar a este profesional?")) return;
     try {
@@ -246,7 +234,6 @@ export default function AdminPanel() {
     } catch (e) { console.error(e); alert("Error al eliminar"); }
   };
 
-  // MODIFICADO: Pre-cargar el profesional actual al abrir el modal
   const handleEditClick = async (user: any) => {
     let extraData: any = {};
     let currentProId = user.linkedProfessionalId || (user.careTeam ? Object.keys(user.careTeam)[0] : '');
@@ -259,7 +246,6 @@ export default function AdminPanel() {
         const snap = await getDoc(doc(db, 'patients', user.uid));
         if (snap.exists()) {
             extraData = snap.data();
-            // Refinamos la obtención del profesional actual desde la BD
             if (extraData.linkedProfessionalId) currentProId = extraData.linkedProfessionalId;
             else if (extraData.careTeam) currentProId = Object.keys(extraData.careTeam)[0];
         }
@@ -270,37 +256,29 @@ export default function AdminPanel() {
     setEditingUser(user);
   };
 
-  // MODIFICADO: Guardar la vinculación del profesional y el usuario
   const saveEdit = async () => {
     try {
         const isPatient = editForm.role === 'patient' || editingUser.isManual;
         
-        // Objeto base de actualización para pacientes
         const patientUpdates: any = {
             fullName: editForm.displayName,
             role: editForm.role, 
             email: editForm.email
         };
 
-        // Si es paciente y se seleccionó un profesional, actualizamos rutas
         if (isPatient && editForm.linkedProfessionalId) {
             patientUpdates.linkedProfessionalId = editForm.linkedProfessionalId;
-            // Actualizamos la ruta careTeam para que el profesional lo vea en su lista
             patientUpdates[`careTeam.${editForm.linkedProfessionalId}.status`] = 'active';
         }
 
         if (editingUser.isManual) {
-            // Es un paciente manual (sólo existe en patients)
             await updateDoc(doc(db, "patients", editingUser.uid), patientUpdates);
         } else {
-            // Es un usuario registrado
             await updateDoc(doc(db, "users", editingUser.uid), {
                 displayName: editForm.displayName, role: editForm.role, email: editForm.email
             });
 
             if (isPatient) {
-                // Hacemos un setDoc con merge en caso de que sea un usuario recién registrado 
-                // que aún no tiene documento en la colección patients
                 await setDoc(doc(db, "patients", editingUser.uid), patientUpdates, { merge: true });
             }
 
@@ -322,7 +300,6 @@ export default function AdminPanel() {
     setSavingConfig(false); alert("Configuración guardada");
   };
 
-  // --- HELPERS VISUALES ---
   const StatCard = ({ title, value, color, icon }: any) => (
     <div style={{background:'white', padding:'15px', borderRadius:'8px', boxShadow:'0 1px 3px rgba(0,0,0,0.1)', flex:1, display:'flex', alignItems:'center', gap:'15px'}}>
        <div style={{background: color, width:'40px', height:'40px', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'20px', color:'white'}}>{icon}</div>
@@ -348,13 +325,6 @@ export default function AdminPanel() {
       )
   };
 
-  // --- RENDERIZADO ---
-  const btnStyle = (active: boolean) => ({
-    padding: '10px 15px', cursor: 'pointer', border: 'none', borderRadius: '5px',
-    background: active ? '#2196F3' : '#e0e0e0', color: active ? 'white' : '#333',
-    fontWeight: 'bold', fontSize: '14px'
-  });
-
   const modalInputStyle = {
     width:'100%', 
     padding:'10px', 
@@ -371,7 +341,6 @@ export default function AdminPanel() {
   return (
     <div style={{ padding: '20px', fontFamily:'sans-serif', position:'relative', background:'#0B1121', minHeight:'100vh', color: '#fff' }}>
      
-      {/* HEADER DINÁMICO */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
         <h2 style={{ color: '#00E5FF', margin: 0, textTransform: 'uppercase', letterSpacing: '2px' }}>
           Panel de Control Nexus
@@ -388,7 +357,6 @@ export default function AdminPanel() {
         </div>
       </div>
      
-      {/* NAVEGACIÓN ESTILO TABS */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '30px', flexWrap: 'wrap' }}>
         {[
           { id: 'users', label: '👥 Usuarios' },
@@ -420,7 +388,6 @@ export default function AdminPanel() {
 
       <hr style={{borderColor:'#334155', marginBottom:'20px'}} />
 
-      {/* --- MODAL EDIT USER (REDISEÑADO TEMA CYBER) --- */}
       {editingUser && (
         <div style={{position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(11, 17, 33, 0.8)', backdropFilter:'blur(4px)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:1000}}>
             <div style={{
@@ -477,7 +444,6 @@ export default function AdminPanel() {
                     </select>
                 </label>
 
-                {/* NUEVO: Selector de Profesional (Sólo visible para pacientes) */}
                 {(editForm.role === 'patient' || editingUser?.isManual) && (
                     <div style={{background:'#0B1121', padding:'15px', borderRadius:'8px', border:'1px solid #334155', marginBottom:'25px'}}>
                         <label style={{display:'block', color: '#00E5FF', fontSize:'13px', fontWeight:'bold', marginBottom:'5px'}}>
@@ -535,8 +501,6 @@ export default function AdminPanel() {
             </div>
         </div>
       )}
-
-      {/* --- VISTAS --- */}
 
       {activeTab === 'config' && (
         <div style={{background:'white', padding:'20px', borderRadius:'8px', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
@@ -626,7 +590,6 @@ export default function AdminPanel() {
       {activeTab === 'economy' && <GameEconomyPanel />}
       {activeTab === 'bulk' && <AdminBulkTools />}
 
-      {/* --- DASHBOARD INTELIGENCIA GLOBAL --- */}
       {activeTab === 'analytics' && (
         <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
             

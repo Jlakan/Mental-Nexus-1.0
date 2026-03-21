@@ -93,7 +93,7 @@ const TaskProgressBar = ({ task }: { task: any }) => {
 
 // --- AÑADIDOS LOS PROPS DEL DICCIONARIO ---
 const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag, dictionary, profession }: any) => {
-  const [newTag, setNewTag] = useState('');
+
 
   const activeTasks = tasks.filter((t:any) => t.status !== 'completed');
   const completedTasks = tasks.filter((t:any) => t.status === 'completed');

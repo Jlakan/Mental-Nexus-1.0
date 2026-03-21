@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { collection, writeBatch, doc, getDocs, getDoc, serverTimestamp } from "firebase/firestore"; 
 import { db } from '../services/firebase';
-import type { CsvTagRow, CsvTaskRow } from '../types/BulkTypes';
+import type { CsvTaskRow } from '../types/BulkTypes';
 
 export default function AdminBulkTools() {
   const [activeTab, setActiveTab] = useState<'tags' | 'tasks'>('tags');
