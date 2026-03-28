@@ -18,10 +18,11 @@ export default function ProfessionalRegister() {
     const fetchProfessions = async () => {
       try {
         const querySnapshot = await getDocs(collection(db, "professions"));
-        const lista = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
+        // Extraemos la lista y filtramos para mostrar SOLO las que están activas
+        const lista = querySnapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter((p: any) => p.active !== false); // Ignora las desactivadas (Soft Delete)
+            
         setProfessions(lista);
       } catch (error) {
         console.error("Error cargando profesiones:", error);
@@ -137,7 +138,7 @@ export default function ProfessionalRegister() {
         </div>
 
         <div>
-          <label>Profesión:</label>
+          <label>Especialidad Clínica:</label>
           <select
             name="professionId"
             required

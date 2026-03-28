@@ -3,7 +3,7 @@ import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { useTagsDictionary } from '../hooks/useTagsDictionary';
 import { PredictiveTagSearch } from './PredictiveTagSearch';
-import type { TagEntry } from '../types/tags'; // <-- Corrección: Se agregó 'type'
+import type { TagEntry } from '../types/tags';
 
 interface PatientTagsManagerProps {
   patientId: string;
@@ -11,20 +11,23 @@ interface PatientTagsManagerProps {
 }
 
 export const PatientTagsManager: React.FC<PatientTagsManagerProps> = ({ patientId, professionType }) => {
-  // 1. Inicializamos el hook
   const { dictionary, loading, error } = useTagsDictionary(professionType);
 
-  // 2. Función para manejar la selección del tag y guardar en Firestore
   const handleTagSelection = async (tagData: TagEntry) => {
     try {
       const patientRef = doc(db, 'patients', patientId);
+      
+      // Construimos el identificador global usando el dominio (profesión)
+      const globalTagString = `${professionType}:${tagData.masterTag}`;
       
       await updateDoc(patientRef, {
         clinicalIndicators: arrayUnion({
           tag: tagData.masterTag,
           category: tagData.category,
-          addedAt: new Date().toISOString() // Puedes cambiar esto por dayjs().toISOString() si lo usas en el proyecto
-        })
+          addedAt: new Date().toISOString() 
+        }),
+        // Inyectamos el string plano en el pasaporte clínico unificado
+        globalTags: arrayUnion(globalTagString)
       });
       
       console.log(`Tag "${tagData.masterTag}" añadido exitosamente al paciente ${patientId}`);
@@ -41,7 +44,6 @@ export const PatientTagsManager: React.FC<PatientTagsManagerProps> = ({ patientI
       <h3 style={{ marginTop: 0 }}>Asignar Indicador Clínico</h3>
       <p style={{ color: '#555', fontSize: '0.9em' }}>Busca por síntoma, diagnóstico o palabra clave.</p>
       
-      {/* 3. Renderizamos el buscador predictivo inyectándole el diccionario en caché */}
       <PredictiveTagSearch 
         dictionary={dictionary} 
         onSelectTag={handleTagSelection} 

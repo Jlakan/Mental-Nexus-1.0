@@ -16,6 +16,7 @@ import PatientDirectory from './PatientDirectory';
 import { analyzeCatalogBatch } from '../utils/ClinicalEngine';
 import { useTagsDictionary } from '../hooks/useTagsDictionary';
 import { PredictiveTagSearch } from './PredictiveTagSearch';
+import { ClinicalNotesPanel } from './ClinicalNotesPanel';
 
 interface Props {
   user: any;
@@ -94,7 +95,6 @@ const TaskProgressBar = ({ task }: { task: any }) => {
 // --- AÑADIDOS LOS PROPS DEL DICCIONARIO ---
 const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag, dictionary, profession }: any) => {
 
-
   const activeTasks = tasks.filter((t:any) => t.status !== 'completed');
   const completedTasks = tasks.filter((t:any) => t.status === 'completed');
 
@@ -161,7 +161,7 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag, dictiona
           ))}
         </div>
 
-        {/* AQUÍ ESTÁ LA MAGIA: El nuevo buscador predictivo integrado */}
+        {/* Buscador predictivo integrado */}
         <div className="flex bg-slate-900 border border-slate-700 rounded-lg p-1 relative w-full">
           <PredictiveTagSearch 
             dictionary={dictionary || []} 
@@ -183,7 +183,6 @@ const PatientVisualStats = ({ tasks, indicators, onAddTag, onDeleteTag, dictiona
     </div>
   );
 };
-
 
 // --- COMPONENTE PRINCIPAL ---
 
@@ -218,7 +217,7 @@ export default function ProfessionalDashboard({ user }: Props) {
   // --- ESTADO PARA FINANZAS ---
   const [isFinancePanelOpen, setIsFinancePanelOpen] = useState(false);
 
-  // --- NUEVO: HOOK DE CONEXIÓN CON EL DICCIONARIO INTELIGENTE ---
+  // --- HOOK DE CONEXIÓN CON EL DICCIONARIO INTELIGENTE ---
   const professionToUse = profData?.professionType || 'psicologia';
   const { dictionary } = useTagsDictionary(professionToUse);
 
@@ -458,7 +457,6 @@ export default function ProfessionalDashboard({ user }: Props) {
     }
   };
 
- 
   // --- RENDER (UI ESTILO V2 CON DATOS V1) ---
 
   if (loading) return <div className="min-h-screen bg-nexus-dark flex items-center justify-center text-nexus-cyan animate-pulse">CARGANDO SISTEMA CLÍNICO...</div>;
@@ -626,7 +624,6 @@ export default function ProfessionalDashboard({ user }: Props) {
                 </div>
               )}
 
-              {/* TÍTULO Y DIRECTORIO NUEVO */}
               <div className="flex justify-between items-end mb-2">
                 <h3 className="text-sm uppercase text-nexus-cyan font-bold tracking-wider">
                   Directorio ({activePatients.length})
@@ -767,7 +764,6 @@ export default function ProfessionalDashboard({ user }: Props) {
                 </div>
               </div>
 
-              {/* AQUÍ SE PASAN LOS NUEVOS PROPS AL COMPONENTE DE TAGS */}
               <PatientVisualStats
                 tasks={patientTasks}
                 indicators={selectedPatient.clinicalIndicators?.[user.uid] || []}
@@ -777,44 +773,61 @@ export default function ProfessionalDashboard({ user }: Props) {
                 profession={professionToUse}
               />
 
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold text-white border-b border-slate-700 pb-2">Plan Activo</h3>
+              {/* AQUI COMIENZA EL NUEVO LAYOUT (IZQ: MISIONES, DER: NOTAS) */}
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 mt-6 items-start">
+                
+                {/* --- COLUMNA IZQUIERDA: MISIONES (Reducida ~20%) --- */}
+                <div className={`space-y-4 ${profData?.notas ? 'xl:col-span-7' : 'xl:col-span-12'}`}>
+                  <h3 className="text-lg font-bold text-white border-b border-slate-700 pb-2">Plan Activo</h3>
 
-                {patientTasks.filter(t => t.status !== 'completed').length === 0 ? (
-                  <div className="text-center py-10 border-2 border-dashed border-slate-700 rounded-xl">
-                    <p className="text-slate-500">No hay tareas activas.</p>
-                    <p className="text-xs text-slate-600 mt-1">Registra asistencia para asignar nuevas misiones.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {patientTasks.filter(t => t.status !== 'completed').map(t => {
-                      const isRoutine = t.type === 'routine';
-                      const borderColorClass = isRoutine ? 'border-purple-500' : 'border-orange-500';
-                      const badgeClass = isRoutine ? 'text-purple-400 bg-purple-900/20' : 'text-orange-400 bg-orange-900/20';
+                  {patientTasks.filter(t => t.status !== 'completed').length === 0 ? (
+                    <div className="text-center py-10 border-2 border-dashed border-slate-700 rounded-xl">
+                      <p className="text-slate-500">No hay tareas activas.</p>
+                      <p className="text-xs text-slate-600 mt-1">Registra asistencia para asignar nuevas misiones.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {patientTasks.filter(t => t.status !== 'completed').map(t => {
+                        const isRoutine = t.type === 'routine';
+                        const borderColorClass = isRoutine ? 'border-purple-500' : 'border-orange-500';
+                        const badgeClass = isRoutine ? 'text-purple-400 bg-purple-900/20' : 'text-orange-400 bg-orange-900/20';
 
-                      return (
-                        <div key={t.id} className={`bg-slate-800 rounded-lg p-4 shadow-lg border-t-4 ${borderColorClass} relative group`}>
-                          <div className="flex justify-between items-start mb-2">
-                            <div>
-                              <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${badgeClass}`}>
-                                {isRoutine ? 'Rutina' : 'Misión'}
-                              </span>
-                              <div className="font-bold text-white mt-1 leading-tight">{t.title}</div>
+                        return (
+                          <div key={t.id} className={`bg-slate-800 rounded-lg p-4 shadow-lg border-t-4 ${borderColorClass} relative group`}>
+                            <div className="flex justify-between items-start mb-2">
+                              <div>
+                                <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${badgeClass}`}>
+                                  {isRoutine ? 'Rutina' : 'Misión'}
+                                </span>
+                                <div className="font-bold text-white mt-1 leading-tight">{t.title}</div>
+                              </div>
+                              <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => handleViewProgress(t)} className="p-1.5 hover:bg-slate-700 rounded text-blue-400" title="Ver Bitácora">👁️</button>
+                                <button onClick={() => handleOpenEditTask(t)} className="p-1.5 hover:bg-slate-700 rounded text-slate-400" title="Editar">✏️</button>
+                                <button onClick={() => handleDeleteTask(t.id, isRoutine)} className="p-1.5 hover:bg-slate-700 rounded text-red-400" title="Eliminar">🗑️</button>
+                              </div>
                             </div>
-                            <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => handleViewProgress(t)} className="p-1.5 hover:bg-slate-700 rounded text-blue-400" title="Ver Bitácora">👁️</button>
-                              <button onClick={() => handleOpenEditTask(t)} className="p-1.5 hover:bg-slate-700 rounded text-slate-400" title="Editar">✏️</button>
-                              <button onClick={() => handleDeleteTask(t.id, isRoutine)} className="p-1.5 hover:bg-slate-700 rounded text-red-400" title="Eliminar">🗑️</button>
-                            </div>
+                            <div className="text-xs text-slate-400 mb-3 truncate">{t.customInstructions || t.description || "Sin instrucciones."}</div>
+                            <TaskProgressBar task={t} />
                           </div>
-                          <div className="text-xs text-slate-400 mb-3 truncate">{t.customInstructions || t.description || "Sin instrucciones."}</div>
-                          <TaskProgressBar task={t} />
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* --- COLUMNA DERECHA: PANEL DE NOTAS (Aumentada ~20%) --- */}
+                {profData?.notas && (
+                  <div className="xl:col-span-5 w-full shrink-0 sticky top-4">
+                    <ClinicalNotesPanel 
+                      patientId={selectedPatient.id} 
+                      professionalId={user.uid} 
+                    />
                   </div>
                 )}
+                
               </div>
+              {/* FIN DEL NUEVO LAYOUT */}
 
               <AssignmentModal isOpen={isAssignmentModalOpen} onClose={() => { setIsAssignmentModalOpen(false); setTaskToEdit(null); loadPatientTasks(selectedPatient.id); }} patientId={selectedPatient.id} professionalId={user.uid} patientName={selectedPatient.fullName} userProfessionId={profData?.professionType || 'psychologist'} taskToEdit={taskToEdit} />
               <HistoryModal isOpen={isHistoryOpen} onClose={() => { setIsHistoryOpen(false); setTaskForHistory(null); }} patientId={selectedPatient.id} patientName={selectedPatient.fullName} specificTask={taskForHistory} />
