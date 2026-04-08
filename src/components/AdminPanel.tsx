@@ -597,7 +597,6 @@ export default function AdminPanel() {
                           style={{
                               padding: '6px 12px', 
                               borderRadius: '20px', 
-                              border: 'none', 
                               fontWeight: 'bold', 
                               cursor: 'pointer', 
                               background: p.active !== false ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)', 
@@ -695,7 +694,7 @@ export default function AdminPanel() {
       {activeTab === 'economy' && <GameEconomyPanel />}
       {activeTab === 'bulk' && <AdminBulkTools />}
 
-      {/* --- DASHBOARD INTELIGENCIA GLOBAL (DISEÑO PULIDO TIPO CAPTURA) --- */}
+      {/* --- DASHBOARD INTELIGENCIA GLOBAL --- */}
       {activeTab === 'analytics' && (
         <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
             
@@ -788,11 +787,6 @@ export default function AdminPanel() {
                                     </tbody>
                                 </table>
                             </div>
-                            {filterMode === 'all' && !searchTerm && (
-                                <div style={{textAlign:'center', fontSize:'11px', color:'#94A3B8', marginTop:'15px'}}>
-                                    Mostrando primeras 20 tareas. Usa "Descargar Excel" para ver todo.
-                                </div>
-                            )}
                         </div>
 
                         <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
