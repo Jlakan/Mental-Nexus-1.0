@@ -1,8 +1,17 @@
+// Ruta: src/App.tsx
+
 import { useState, useEffect } from 'react';
+import { BrowserRouter } from 'react-router-dom';
 
 // --- FIREBASE IMPORTS ---
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  writeBatch,
+  collection,
+} from 'firebase/firestore';
 import { auth, db } from './services/firebase';
 
 // --- COMPONENTES ---
@@ -10,27 +19,88 @@ import Login from './components/Login';
 import RoleSelection from './components/RoleSelection';
 
 // Componentes de Paciente
-import PatientRegister from './components/PatientRegister';
-import PatientDashboard from './components/PatientDashboard';
+import PatientRegister from './components/register/patients';
+import PatientDashboard from './components/patient/PatientDashboard';
 
 // Componentes de Profesional
-import ProfessionalRegister from './components/ProfessionalRegister';
-import ProfessionalDashboard from './components/ProfessionalDashboard';
+import ProfessionalRegister from './components/register/professionals';
+import ProfessionalDashboard from './components/professional/ProfessionalDashboard';
 
 // Componentes de Admin
 import AdminPanel from './components/AdminPanel';
 
 // Componentes de Asistente
-import AssistantRegister from './components/AssistantRegister';
+import AssistantRegister from './components/register/assistant/AssistantRegister';
 import AssistantPanel from './components/AssistantPanel';
-import AgendaView from './components/agenda';
+
+// IMPORTACIÓN DE LA AGENDA
+import AgendaMain from './components/agenda/AgendaMain';
+
+// --- FUNCIÓN ADICIONAL PARA INICIALIZAR EL DIRECTORIO DUMMY ---
+async function initializeDummyDirectory() {
+  const batch = writeBatch(db);
+  const professionId = 'psicologia';
+  const dummyProfessionalId = 'dummy_prof_001';
+
+  const professionMetaRef = doc(db, 'professions', professionId);
+  const shardRef = doc(
+    db,
+    'professions',
+    professionId,
+    'directory_shards',
+    'shard_0'
+  );
+
+  const dummyIndexProfile = {
+    fullName: 'Psic. Alejandro Martínez (Demo)',
+    clinicName: 'Centro Regional de Desarrollo Infantil',
+    clinicCity: 'Durango, Dgo.',
+    clinicAddress: 'Av. 20 de Noviembre #102, Col. Centro',
+    publicPhone: '6181234567',
+    links: {
+      maps: null,
+      facebook: null,
+      instagram: null,
+    },
+  };
+
+  batch.set(
+    professionMetaRef,
+    {
+      name: 'psicología',
+      totalProfessionals: 1,
+      totalShards: 1,
+      active: true,
+    },
+    { merge: true }
+  );
+
+  batch.set(
+    shardRef,
+    {
+      professionals: {
+        [dummyProfessionalId]: dummyIndexProfile,
+      },
+    },
+    { merge: true }
+  );
+
+  try {
+    await batch.commit();
+    console.log(
+      'Estructura de directorios e índice dummy creados con éxito en Firestore.'
+    );
+  } catch (error) {
+    console.error('Error al inicializar el directorio dummy:', error);
+  }
+}
 
 export default function App() {
   // ---------------------------------------------------------------------------
   // 1. ESTADOS
   // ---------------------------------------------------------------------------
   const [user, setUser] = useState<any>(null);
-  const [userData, setUserData] = useState<any>(null); // Aquí viene el campo isAdmin
+  const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   // Estados de Verificación de Perfil
@@ -40,12 +110,24 @@ export default function App() {
 
   // Estados de Navegación / Desarrollo
   const [simulatedRole, setSimulatedRole] = useState<string | null>(null);
-  const [adminViewMode, setAdminViewMode] = useState<'admin' | 'professional'>('admin');
-  
-  // Persistencia del doctor seleccionado (LocalStorage) para Asistentes
-  const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(() => {
-    return localStorage.getItem('nexus_assistant_selected_doc');
-  });
+  const [adminViewMode, setAdminViewMode] = useState<'admin' | 'professional'>(
+    'admin'
+  );
+
+  // Persistencia del doctor seleccionado
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(
+    () => {
+      return localStorage.getItem('nexus_assistant_selected_doc');
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // EFECTO ADICIONAL PARA LA CREACIÓN DEL DUMMY (EJECUCIÓN ÚNICA)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    // Descomenta la línea de abajo para crear la ruta automáticamente en tu base de datos al recargar
+    // initializeDummyDirectory();
+  }, []);
 
   // ---------------------------------------------------------------------------
   // 2. EFECTO DE CARGA Y AUTENTICACIÓN
@@ -55,7 +137,6 @@ export default function App() {
       setLoading(true);
       if (currentUser) {
         setUser(currentUser);
-        // Buscar datos maestros en users/{UID}
         const userRef = doc(db, 'users', currentUser.uid);
         const docSnap = await getDoc(userRef);
 
@@ -63,16 +144,13 @@ export default function App() {
           const data = docSnap.data();
           setUserData(data);
 
-          // Verificar sub-perfiles según el rol
           if (data.role === 'patient') {
             setProfileCompleted(data.profileCompleted === true);
-          } 
-          else if (data.role === 'professional') {
+          } else if (data.role === 'professional') {
             const proRef = doc(db, 'professionals', currentUser.uid);
             const proSnap = await getDoc(proRef);
             setIsRegisteredPro(proSnap.exists());
-          } 
-          else if (data.role === 'assistant') {
+          } else if (data.role === 'assistant') {
             const assistantRef = doc(db, 'assistants', currentUser.uid);
             const assistantSnap = await getDoc(assistantRef);
             setIsRegisteredAssistant(assistantSnap.exists());
@@ -92,193 +170,261 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // 3. HANDLERS
   // ---------------------------------------------------------------------------
-  
-  const handleRoleSelect = async (role: 'patient' | 'professional' | 'assistant') => {
+  const handleRoleSelect = async (
+    role: 'patient' | 'professional' | 'assistant'
+  ) => {
     if (!user) return;
     try {
-      await setDoc(doc(db, 'users', user.uid), {
-        role: role,
-        email: user.email,
-        updatedAt: new Date()
-      }, { merge: true });
+      await setDoc(
+        doc(db, 'users', user.uid),
+        {
+          role: role,
+          email: user.email,
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
       window.location.reload();
     } catch (error) {
-      console.error("Error asignando rol:", error);
+      console.error('Error asignando rol:', error);
     }
   };
 
   const handleSelectDoctor = (profId: string | null) => {
     setSelectedDoctorId(profId);
     if (profId) {
-        localStorage.setItem('nexus_assistant_selected_doc', profId);
+      localStorage.setItem('nexus_assistant_selected_doc', profId);
     } else {
-        localStorage.removeItem('nexus_assistant_selected_doc');
+      localStorage.removeItem('nexus_assistant_selected_doc');
     }
   };
 
   // ---------------------------------------------------------------------------
-  // 4. RENDERIZADO
+  // 4. LÓGICA DE RENDERIZADO (Contenida en una función)
   // ---------------------------------------------------------------------------
-
-  if (loading) {
-    return (
-      <div className="h-screen bg-slate-950 flex flex-col items-center justify-center text-cyan-400">
-        <div className="animate-spin text-4xl mb-4">⚛️</div>
-        <p className="tracking-widest animate-pulse">CARGANDO NEXUS...</p>
-      </div>
-    );
-  }
-
-  if (!user) return <Login />;
-  
-  if (!userData?.role) {
-    return <RoleSelection userName={user.displayName || 'Usuario'} onSelect={handleRoleSelect} />;
-  }
-
-  // Si hay un rol simulado (Dev Mode), úsalo. Si no, usa el real.
-  const activeRole = simulatedRole || userData.role;
-
-  // --- ROL: PACIENTE ---
-  if (activeRole === 'patient') {
+  const renderAppContent = () => {
+    if (loading) {
       return (
-        <>
-            {profileCompleted ? (
-                <PatientDashboard user={user} />
-            ) : (
-                <PatientRegister onComplete={() => setProfileCompleted(true)} />
-            )}
-            
-            {/* SOLO SI ES ADMIN MUESTRA EL SWITCHER */}
-            {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
-        </>
-      );
-  }
-
-  // --- ROL: PROFESIONAL ---
-  if (activeRole === 'professional') {
-      return (
-        <>
-            {isRegisteredPro ? <ProfessionalDashboard user={user} /> : <ProfessionalRegister />}
-            
-            {/* SOLO SI ES ADMIN MUESTRA EL SWITCHER */}
-            {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
-        </>
-      );
-  }
-
-  // --- ROL: ASISTENTE ---
-  if (activeRole === 'assistant') {
-      return (
-        <>
-            {!isRegisteredAssistant ? (
-                <AssistantRegister />
-            ) : (
-                <div className="flex flex-col h-screen bg-slate-950">
-                    {/* BOTÓN FLOTANTE CORREGIDO */}
-                    {selectedDoctorId && (
-                    <div className="fixed bottom-6 left-6 z-[100]">
-                        <button 
-                          onClick={() => handleSelectDoctor(null)}
-                          className="flex items-center justify-center w-14 h-14 bg-slate-800 border border-slate-700 hover:border-cyan-400 text-cyan-400 rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.3)] hover:shadow-[0_0_15px_rgba(34,211,238,0.4)] transition-all active:scale-95 group"
-                          aria-label="Volver a mis doctores"
-                          title="Volver a mis doctores"
-                        >
-                          <svg 
-                            xmlns="http://www.w3.org/2000/svg" 
-                            fill="none" 
-                            viewBox="0 0 24 24" 
-                            strokeWidth={2.5} 
-                            stroke="currentColor" 
-                            className="w-6 h-6 group-hover:-translate-x-1 transition-transform"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-                          </svg>
-                        </button>
-                    </div>
-                    )}
-
-                    {selectedDoctorId ? (
-                    <AgendaView 
-                        userRole="assistant"
-                        currentUserId={user.uid}
-                        doctorId={selectedDoctorId}
-                        onBack={() => handleSelectDoctor(null)} 
-                    />
-                    ) : (
-                    <AssistantPanel onSelectProfessional={handleSelectDoctor} />
-                    )}
-                </div>
-            )}
-            
-            {/* SOLO SI ES ADMIN MUESTRA EL SWITCHER */}
-            {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
-        </>
-      );
-  }
-
-  // --- ROL: ADMIN ---
-  if (activeRole === 'admin') {
-      return (
-        <div className="relative min-h-screen">
-            {userData?.isAdmin === true && (
-                <div className="fixed bottom-6 right-20 z-40">
-                    <button 
-                        onClick={() => setAdminViewMode(prev => prev === 'admin' ? 'professional' : 'admin')}
-                        className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-xl flex items-center justify-center text-2xl border-2 border-white transition-transform hover:scale-110"
-                        title={adminViewMode === 'admin' ? "Ver como Profesional" : "Volver a Admin"}
-                    >
-                        {adminViewMode === 'admin' ? '👨‍⚕️' : '🛠'}
-                    </button>
-                </div>
-            )}
-            {adminViewMode === 'admin' ? <AdminPanel /> : <ProfessionalDashboard user={user} />}
-            
-            {/* SOLO SI ES ADMIN MUESTRA EL SWITCHER */}
-            {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
+        <div className="h-screen bg-slate-950 flex flex-col items-center justify-center text-cyan-400">
+          <div className="animate-spin text-4xl mb-4">⚛️</div>
+          <p className="tracking-widest animate-pulse">CARGANDO NEXUS...</p>
         </div>
       );
-  }
+    }
 
-  // --- FALLBACK (Rol Desconocido) ---
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-6 text-center">
-      <h1 className="text-3xl text-red-500 font-bold mb-4">⚠️ Rol Desconocido</h1>
-      <p className="mb-6 text-slate-400">Rol detectado: <strong>"{activeRole}"</strong></p>
-      
-      <button
-        onClick={async () => {
-          if(!window.confirm("¿Seguro que deseas restablecer tu rol?")) return;
-          await setDoc(doc(db, "users", user.uid), { role: null }, { merge: true });
-          window.location.reload();
-        }}
-        className="px-6 py-2 bg-red-600 rounded font-bold mb-4 hover:bg-red-500 transition"
-      >
-        🔄 Restablecer Cuenta
-      </button>
+    if (!user) return <Login />;
 
-      {/* Botón de Cerrar Sesión conservado */}
-      <button onClick={() => auth.signOut()} className="underline text-slate-500 hover:text-white mt-4">
-        Cerrar Sesión
-      </button>
-    </div>
-  );
+    if (!userData?.role) {
+      return (
+        <RoleSelection
+          userName={user.displayName || 'Usuario'}
+          onSelect={handleRoleSelect}
+        />
+      );
+    }
+
+    const activeRole = simulatedRole || userData.role;
+
+    // --- ROL: PACIENTE ---
+    if (activeRole === 'patient') {
+      return (
+        <>
+          {profileCompleted ? (
+            <PatientDashboard user={user} />
+          ) : (
+            <PatientRegister onComplete={() => setProfileCompleted(true)} />
+          )}
+          {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
+        </>
+      );
+    }
+
+    // --- ROL: PROFESIONAL ---
+    if (activeRole === 'professional') {
+      return (
+        <>
+          {isRegisteredPro ? (
+            <ProfessionalDashboard user={user} />
+          ) : (
+            <ProfessionalRegister />
+          )}
+          {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
+        </>
+      );
+    }
+
+    // --- ROL: ASISTENTE ---
+    if (activeRole === 'assistant') {
+      return (
+        <>
+          {!isRegisteredAssistant ? (
+            <AssistantRegister />
+          ) : (
+            <div className="flex flex-col h-screen bg-slate-950">
+              {selectedDoctorId && (
+                <div className="fixed bottom-6 left-6 z-[100]">
+                  <button
+                    onClick={() => handleSelectDoctor(null)}
+                    className="flex items-center justify-center w-14 h-14 bg-slate-800 border border-slate-700 hover:border-cyan-400 text-cyan-400 rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.3)] hover:shadow-[0_0_15px_rgba(34,211,238,0.4)] transition-all active:scale-95 group"
+                    aria-label="Volver a mis doctores"
+                    title="Volver a mis doctores"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2.5}
+                      stroke="currentColor"
+                      className="w-6 h-6 group-hover:-translate-x-1 transition-transform"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              )}
+
+              {selectedDoctorId ? (
+                <AgendaMain
+                  userRole="assistant"
+                  currentUserId={user.uid}
+                  doctorId={selectedDoctorId}
+                  onBack={() => handleSelectDoctor(null)}
+                />
+              ) : (
+                <AssistantPanel onSelectProfessional={handleSelectDoctor} />
+              )}
+            </div>
+          )}
+          {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
+        </>
+      );
+    }
+
+    // --- ROL: ADMIN ---
+    if (activeRole === 'admin') {
+      return (
+        <div className="relative min-h-screen">
+          {userData?.isAdmin === true && (
+            <div className="fixed bottom-6 right-20 z-40">
+              <button
+                onClick={() =>
+                  setAdminViewMode((prev) =>
+                    prev === 'admin' ? 'professional' : 'admin'
+                  )
+                }
+                className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-xl flex items-center justify-center text-2xl border-2 border-white transition-transform hover:scale-110"
+                title={
+                  adminViewMode === 'admin'
+                    ? 'Ver como Profesional'
+                    : 'Volver a Admin'
+                }
+              >
+                {adminViewMode === 'admin' ? '👨‍⚕️' : '🛠'}
+              </button>
+            </div>
+          )}
+          {adminViewMode === 'admin' ? (
+            <AdminPanel />
+          ) : (
+            <ProfessionalDashboard user={user} />
+          )}
+          {userData?.isAdmin && <DevRoleSwitcher onSwitch={setSimulatedRole} />}
+        </div>
+      );
+    }
+
+    // --- FALLBACK ---
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-6 text-center">
+        <h1 className="text-3xl text-red-500 font-bold mb-4">
+          ⚠️ Rol Desconocido
+        </h1>
+        <p className="mb-6 text-slate-400">
+          Rol detectado: <strong>"{activeRole}"</strong>
+        </p>
+        <button
+          onClick={async () => {
+            if (!window.confirm('¿Seguro que deseas restablecer tu rol?'))
+              return;
+            await setDoc(
+              doc(db, 'users', user.uid),
+              { role: null },
+              { merge: true }
+            );
+            window.location.reload();
+          }}
+          className="px-6 py-2 bg-red-600 rounded font-bold mb-4 hover:bg-red-500 transition"
+        >
+          🔄 Restablecer Cuenta
+        </button>
+        <button
+          onClick={() => auth.signOut()}
+          className="underline text-slate-500 hover:text-white mt-4"
+        >
+          Cerrar Sesión
+        </button>
+      </div>
+    );
+  };
+
+  // ---------------------------------------------------------------------------
+  // 5. RENDER PRINCIPAL (Envuelto en BrowserRouter)
+  // ---------------------------------------------------------------------------
+  return <BrowserRouter>{renderAppContent()}</BrowserRouter>;
 }
 
-// Componente auxiliar para desarrollo con estilos detallados conservados
-function DevRoleSwitcher({ onSwitch }: { onSwitch: (r: string | null) => void }) {
+// COMPONENTE DEV SWITCHER
+function DevRoleSwitcher({
+  onSwitch,
+}: {
+  onSwitch: (r: string | null) => void;
+}) {
   return (
     <div className="fixed bottom-4 right-4 z-[9999] group">
       <div className="bg-slate-900/90 border border-cyan-500/30 p-2 rounded-lg backdrop-blur-md shadow-2xl opacity-60 hover:opacity-100 transition-all">
-        <div className="text-[10px] text-cyan-400 font-bold mb-1 text-center hidden group-hover:block">DEV MODE</div>
-        <div className="flex flex-col gap-1 h-0 group-hover:h-auto overflow-hidden transition-all">
-          <button onClick={() => onSwitch(null)} className="px-2 py-1 text-xs bg-slate-700 text-white rounded hover:bg-red-500">Reset</button>
-          <div className="h-[1px] bg-slate-700 my-1"></div>
-          <button onClick={() => onSwitch('admin')} className="px-2 py-1 text-xs bg-slate-800 text-cyan-400 rounded border border-cyan-900">Admin</button>
-          <button onClick={() => onSwitch('professional')} className="px-2 py-1 text-xs bg-slate-800 text-blue-400 rounded border border-blue-900">Pro</button>
-          <button onClick={() => onSwitch('patient')} className="px-2 py-1 text-xs bg-slate-800 text-green-400 rounded border border-green-900">User</button>
-          <button onClick={() => onSwitch('assistant')} className="px-2 py-1 text-xs bg-slate-800 text-purple-400 rounded border border-purple-900">Asist</button>
+        <div className="text-[10px] text-cyan-400 font-bold mb-1 text-center hidden group-hover:block">
+          DEV MODE
         </div>
-        <div className="w-8 h-8 rounded-full bg-cyan-900/50 flex items-center justify-center text-cyan-400 border border-cyan-500 cursor-pointer">⚡</div>
+        <div className="flex flex-col gap-1 h-0 group-hover:h-auto overflow-hidden transition-all">
+          <button
+            onClick={() => onSwitch(null)}
+            className="px-2 py-1 text-xs bg-slate-700 text-white rounded hover:bg-red-500"
+          >
+            Reset
+          </button>
+          <div className="h-[1px] bg-slate-700 my-1"></div>
+          <button
+            onClick={() => onSwitch('admin')}
+            className="px-2 py-1 text-xs bg-slate-800 text-cyan-400 rounded border border-cyan-900"
+          >
+            Admin
+          </button>
+          <button
+            onClick={() => onSwitch('professional')}
+            className="px-2 py-1 text-xs bg-slate-800 text-blue-400 rounded border border-blue-900"
+          >
+            Pro
+          </button>
+          <button
+            onClick={() => onSwitch('patient')}
+            className="px-2 py-1 text-xs bg-slate-800 text-green-400 rounded border border-green-900"
+          >
+            User
+          </button>
+          <button
+            onClick={() => onSwitch('assistant')}
+            className="px-2 py-1 text-xs bg-slate-800 text-purple-400 rounded border border-purple-900"
+          >
+            Asist
+          </button>
+        </div>
+        <div className="w-8 h-8 rounded-full bg-cyan-900/50 flex items-center justify-center text-cyan-400 border border-cyan-500 cursor-pointer">
+          ⚡
+        </div>
       </div>
     </div>
   );

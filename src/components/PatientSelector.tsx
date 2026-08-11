@@ -1,3 +1,4 @@
+//src/components/PatientSelector.tsx
 import { useState, useEffect, useRef } from 'react';
 
 interface Props {
@@ -8,7 +9,13 @@ interface Props {
   onInputChange?: (value: string) => void;
 }
 
-export default function PatientSelector({ patients, selectedPatientId, manualNameValue, onSelect, onInputChange }: Props) {
+export default function PatientSelector({
+  patients,
+  selectedPatientId,
+  manualNameValue,
+  onSelect,
+  onInputChange,
+}: Props) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -16,7 +23,7 @@ export default function PatientSelector({ patients, selectedPatientId, manualNam
   // Sincronizar input
   useEffect(() => {
     if (selectedPatientId) {
-      const p = patients.find(x => x.id === selectedPatientId);
+      const p = patients.find((x) => x.id === selectedPatientId);
       if (p) setSearchTerm(p.fullName);
     } else if (manualNameValue) {
       setSearchTerm(manualNameValue);
@@ -31,14 +38,20 @@ export default function PatientSelector({ patients, selectedPatientId, manualNam
         setIsOpen(false);
       }
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [wrapperRef]);
 
-  const filteredPatients = patients.filter(p => {
+  const filteredPatients = patients.filter((p) => {
     if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const name = p.fullName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const term = searchTerm
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    const name = p.fullName
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
     return name.includes(term);
   });
 
@@ -55,49 +68,49 @@ export default function PatientSelector({ patients, selectedPatientId, manualNam
     if (onInputChange) onInputChange(val);
   };
 
-  const showManualOption = searchTerm && !patients.some(p => p.fullName.toLowerCase() === searchTerm.toLowerCase());
+  const showManualOption =
+    searchTerm.length >= 3 &&
+    !patients.some(
+      (p) => p.fullName.toLowerCase() === searchTerm.toLowerCase()
+    );
+
+  // Condición: Solo mostrar el dropdown si está abierto y hay al menos 3 letras
+  const showDropdown = isOpen && searchTerm.length >= 3;
 
   return (
-    <div ref={wrapperRef} style={{ position: 'relative', width: '100%' }}>
-      <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px', color: '#000' }}>Paciente:</label>
+    <div ref={wrapperRef} className="relative w-full">
+      {/* Etiqueta corregida con clases de Tailwind */}
+      <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">
+        Paciente:
+      </label>
       <input
         type="text"
         placeholder="Buscar o escribir nombre nuevo..."
         value={searchTerm}
         onChange={handleInputChange}
         onFocus={() => setIsOpen(true)}
-        style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc', boxSizing:'border-box', color: '#000' }}
-        autoComplete="off" 
+        className="w-full p-3 bg-slate-800 border border-slate-700 hover:border-cyan-500/50 focus:border-cyan-400 rounded-md text-sm text-slate-200 outline-none transition-colors"
+        autoComplete="off"
       />
 
-      {isOpen && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid #ccc',
-          borderRadius: '0 0 6px 6px', zIndex: 3000, maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 10px rgba(0,0,0,0.1)'
-        }}>
-          
+      {showDropdown && (
+        <div className="absolute top-full left-0 right-0 bg-slate-900 border border-slate-700 rounded-b-md z-[3000] max-h-[200px] overflow-y-auto shadow-[0_4px_20px_rgba(0,0,0,0.5)] mt-1">
           {filteredPatients.length === 0 && !showManualOption && (
-            <div style={{padding:'10px', color:'#000', fontStyle:'italic'}}>No se encontraron resultados.</div>
+            <div className="p-3 text-slate-400 italic text-sm">
+              No se encontraron resultados.
+            </div>
           )}
 
-          {filteredPatients.map(p => (
+          {filteredPatients.map((p) => (
             <div
               key={p.id}
               onClick={() => handleSelect(p.id, p.fullName)}
-              style={{ padding: '10px', cursor: 'pointer', borderBottom: '1px solid #eee', background: 'white', display:'flex', alignItems:'center', gap:'10px' }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#f0f0f0'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
+              className="p-3 cursor-pointer border-b border-slate-800 bg-slate-900 hover:bg-slate-800 flex items-center gap-3 transition-colors"
             >
-              <div style={{fontSize:'18px'}}>
-                {p.isManual ? '📝' : '📱'}
-              </div>
+              <div className="text-lg">{p.isManual ? '📝' : '📱'}</div>
               <div>
-                {/* AJUSTE: Nombre en negro sólido para legibilidad */}
-                <div style={{ fontWeight: 'bold', color: '#000' }}>
-                  {p.fullName}
-                </div>
-                {/* AJUSTE: Subtítulo con negro y azul oscuro para contraste */}
-                <div style={{ fontSize: '11px', color: p.isManual ? '#000000' : '#000033' }}>
+                <div className="font-bold text-slate-200">{p.fullName}</div>
+                <div className="text-xs text-slate-400">
                   {p.isManual ? 'Paciente Local' : 'App Verificado'}
                 </div>
               </div>
@@ -107,11 +120,11 @@ export default function PatientSelector({ patients, selectedPatientId, manualNam
           {showManualOption && (
             <div
               onClick={() => {
-                  if(onInputChange) onInputChange(searchTerm);
-                  onSelect('', searchTerm); 
-                  setIsOpen(false);
+                if (onInputChange) onInputChange(searchTerm);
+                onSelect('', searchTerm);
+                setIsOpen(false);
               }}
-              style={{ padding: '10px', cursor: 'pointer', background: '#E8F5E9', color: '#2E7D32', borderTop: '2px solid #4CAF50', fontWeight: 'bold' }}
+              className="p-3 cursor-pointer bg-cyan-950/30 text-cyan-400 border-t border-cyan-800 font-bold hover:bg-cyan-900/50 transition-colors"
             >
               + Usar como nuevo: "{searchTerm}"
             </div>

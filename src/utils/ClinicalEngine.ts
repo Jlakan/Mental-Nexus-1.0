@@ -1,4 +1,6 @@
 // src/utils/ClinicalEngine.ts
+// Hace la evaluación estadística del cumplimiento de tareas así como el apego
+// al cumplimiento. Llega el registro del streak y calcula tendencias así como riesgo de abandono
 
 import { 
   doc, 

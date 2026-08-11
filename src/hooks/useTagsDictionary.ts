@@ -1,3 +1,5 @@
+//Este componente lee los tags y revisa las versiones de la lista para evitar
+//consumir muuchas lecturas, no escribe ni edita los tags
 import { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore'; // <-- Corrección: Se eliminaron 'collection' y 'getDocs'
 import { db } from '../services/firebase';

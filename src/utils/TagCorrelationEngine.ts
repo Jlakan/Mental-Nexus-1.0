@@ -1,4 +1,6 @@
 // src/utils/TagCorrelationEngine.ts
+// Cuenta la frecuencia en que los tags aparecen juntos, no hace cálculos estadísticos
+// solo cuenta lo que aparece junto
 
 export const calculateTagCorrelations = (patientsList: any[]) => {
     const correlations: Record<string, number> = {};
