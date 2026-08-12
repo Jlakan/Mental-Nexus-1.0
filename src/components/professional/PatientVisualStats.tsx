@@ -1,5 +1,5 @@
 // src/components/professional/PatientVisualStats.tsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { PredictiveTagSearch } from '../PredictiveTagSearch';
 
 const DualDoughnutChart = ({

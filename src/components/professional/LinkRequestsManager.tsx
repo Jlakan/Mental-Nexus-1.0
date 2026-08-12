@@ -1,6 +1,6 @@
 // Ruta: src/components/professional/LinkRequestsManager.tsx
 
-import React, { useState, useEffect } from 'react';
+import  { useState, useEffect } from 'react';
 import { collection, doc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../../services/firebase'; // Ajusta la ruta si es necesario
 

@@ -1,7 +1,7 @@
 // src/components/Login.tsx
-import { useState, useRef } from 'react'; // CORREGIDO: Se eliminó useEffect
-import { auth, googleProvider } from '../services/firebase';
-import { signInWithPopup, signInWithEmailAndPassword } from 'firebase/auth';
+import { useState, useRef } from 'react';
+import { auth } from '../services/firebase';
+import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 // Importación del sistema de diseño (Asegúrate de que la ruta ./design/AtlasDesignSystem sea correcta)
 import {
   AtlasCard,
@@ -9,6 +9,8 @@ import {
   AtlasIcons,
   AtlasText,
 } from './patient/AtlasDesignSystem';
+
+declare global { interface Window { google: any } }
 
 export default function Login() {
   // --- ESTADOS DE LA INTERFAZ ---
@@ -68,16 +70,46 @@ export default function Login() {
     }
   };
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = () => {
+    if (!window.google) {
+      setError('Google no cargó correctamente.');
+      return;
+    }
+    if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) {
+      setError('Falta VITE_GOOGLE_CLIENT_ID en el .env');
+      return;
+    }
+    
     setLoading(true);
     setError('');
+    
     try {
-      await signInWithPopup(auth, googleProvider);
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        scope: 'email profile openid',
+        callback: async (tokenResponse: any) => {
+          try {
+            const credential = GoogleAuthProvider.credential(null, tokenResponse.access_token);
+            await signInWithCredential(auth, credential);
+          } catch (err) {
+            console.error(err);
+            setError('Error al autenticar con Google.');
+          } finally {
+            setLoading(false);
+          }
+        },
+        error_callback: (err: any) => {
+          console.error(err);
+          // El usuario cerró el popup
+          setLoading(false);
+        }
+      });
+      
+      client.requestAccessToken();
     } catch (err) {
       console.error(err);
-      setError('Error al autenticar con Google.');
-    } finally {
       setLoading(false);
+      setError('Error al autenticar con Google.');
     }
   };
 
@@ -99,7 +131,7 @@ export default function Login() {
             <span className="text-4xl">⚡</span>
           </div>
           <h1 className="text-2xl font-bold text-cyan-500 tracking-[0.3em] uppercase mb-2">
-            MENTAL NEXUS
+            NEXUS
           </h1>
           <button className="mt-8 px-8 py-3 border border-slate-400 text-slate-400 text-sm hover:bg-slate-200 hover:text-slate-900 transition-all duration-300 tracking-widest uppercase font-mono">
             INICIAR SISTEMA
@@ -175,7 +207,7 @@ export default function Login() {
               />
             </div>
             <h1 className="text-3xl font-bold text-white tracking-widest uppercase font-mono">
-              MENTAL <span className="text-cyan-500">NEXUS</span>
+              <span className="text-cyan-500">NEXUS</span>
             </h1>
             <AtlasText variant="code" className="mt-1 opacity-70">
               ACCESO SEGURO

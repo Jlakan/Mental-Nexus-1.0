@@ -1,5 +1,4 @@
 // src/components/professional/DashboardHeader.tsx
-import React from 'react';
 
 // Exportamos la interfaz para que el Dashboard la pueda usar
 export interface ProfessionalData {
