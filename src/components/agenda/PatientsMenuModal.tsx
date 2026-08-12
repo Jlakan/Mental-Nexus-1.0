@@ -1,5 +1,5 @@
 // src/components/agenda/PatientsMenuModal.tsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import ModalPortal from '../ModalPortal';
 
 interface PatientsMenuModalProps {

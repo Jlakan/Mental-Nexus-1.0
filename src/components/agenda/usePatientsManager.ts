@@ -1,5 +1,4 @@
 // src/components/agenda/usePatientsManager.ts
-import { useCallback } from 'react';
 import {
   collection,
   doc,

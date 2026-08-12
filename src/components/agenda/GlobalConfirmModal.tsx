@@ -1,5 +1,4 @@
 //src/components/agenda/GlobalConfirmModal.tsx
-import React from 'react';
 import ModalPortal from '../ModalPortal';
 
 interface GlobalConfirmModalProps {

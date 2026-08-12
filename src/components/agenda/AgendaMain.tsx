@@ -1142,7 +1142,7 @@ export default function AgendaMain({
        }}
        onSubmit={(data) => {
          if (editingPatient) {
-           return updatePatientContact(editingPatient.id, editingPatient.shardId, data);
+           return updatePatientContact(editingPatient.id, data);
          } else {
            return createNewPatient(data);
          }

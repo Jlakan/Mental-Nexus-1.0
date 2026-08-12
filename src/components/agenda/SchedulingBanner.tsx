@@ -1,5 +1,4 @@
 // src/components/agenda/SchedulingBanner.tsx
-import React from 'react';
 
 interface SchedulingBannerProps {
   isVisible: boolean;

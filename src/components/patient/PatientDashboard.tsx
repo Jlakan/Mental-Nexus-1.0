@@ -76,8 +76,8 @@ export default function PatientDashboard({ user }: PatientDashboardProps) {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [pendingTaskToOpen, setPendingTaskToOpen] = useState<any>(null);
 
-  const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const overlayTimeoutRef = useRef<number | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
   const notifiedTasks = useRef<Set<string>>(new Set());
 
   // Limpieza de timeouts

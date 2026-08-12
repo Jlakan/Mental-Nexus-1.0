@@ -1,5 +1,4 @@
 //src/components/agenda/WaitlistSelectorModal.tsx
-import React from 'react';
 import ModalPortal from '../ModalPortal';
 
 // Saneamiento del tipo 'any' para los elementos de la lista de espera

@@ -1,5 +1,5 @@
 //src/components/agenda/ConflictModal.tsx
-import React from 'react';
+
 import dayjs from 'dayjs';
 import ModalPortal from '../ModalPortal';
 import type { AgendaSlot } from '../../utils/agendaTypes';

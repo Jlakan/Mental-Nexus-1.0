@@ -1,5 +1,5 @@
 // src/components/agenda/PatientHubModal.tsx
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import ModalPortal from '../ModalPortal';
 
 interface PatientHubModalProps {

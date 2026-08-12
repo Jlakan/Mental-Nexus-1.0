@@ -6,14 +6,13 @@ import {
   collection,
   query,
   getDocs,
-  updateDoc,
   writeBatch,
   serverTimestamp,
   orderBy,
 } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 import dayjs from 'dayjs';
-import type { AgendaSlot, WorkConfig } from '../utils/agendaTypes';
+import type { AgendaSlot, WorkConfig } from '../../utils/agendaTypes';
 
 export interface AnnualEvent {
   id: string;

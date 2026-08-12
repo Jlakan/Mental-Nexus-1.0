@@ -1,4 +1,4 @@
-import React from 'react';
+
 import dayjs from 'dayjs';
 import type { MonthlySlotMap } from '../../utils/agendaTypes';
 
