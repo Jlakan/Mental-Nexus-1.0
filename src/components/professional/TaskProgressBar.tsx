@@ -1,4 +1,3 @@
-import React from 'react';
 
 interface TaskProgressBarProps {
   task: any; // Considera tipar esto más adelante (ej. TaskData)

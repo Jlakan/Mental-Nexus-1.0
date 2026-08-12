@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import type { SpecialtyData } from '../hooks/useAssistantRegister';
 
 // Diccionario visual: Mapea el ID de la base de datos con un emoji.

@@ -1,6 +1,5 @@
 // Ruta: src/components/register/patients/index.tsx
 
-import React from 'react';
 import { auth } from '../../../services/firebase';
 import { usePatientRegister } from './usePatientRegister';
 import PatientBasicDataForm from './PatientBasicDataForm';

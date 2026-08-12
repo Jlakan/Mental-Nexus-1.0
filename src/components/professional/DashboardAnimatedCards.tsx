@@ -1,5 +1,4 @@
 // src/components/professional/DashboardAnimatedCards.tsx
-import React from 'react';
 
 interface DashboardAnimatedCardsProps {
   activePatientsCount: number;

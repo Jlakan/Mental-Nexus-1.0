@@ -1,7 +1,5 @@
 // Ruta: src/components/register/patients/ProfessionalResultCard.tsx
 
-import React from 'react';
-
 interface ProfessionalData {
   id: string;
   fullName: string;

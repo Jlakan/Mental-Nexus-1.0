@@ -10,7 +10,7 @@ import {
   documentId,
 } from 'firebase/firestore';
 import { db } from '../../services/firebase';
-import type { View } from './ProfessionalDashboard';
+import type View from './ProfessionalDashboard';
 import type { ProfessionalData } from './DashboardHeader';
 
 // Importamos el motor centralizado

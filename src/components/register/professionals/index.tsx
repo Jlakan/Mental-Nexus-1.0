@@ -1,6 +1,4 @@
 // Ruta: src/components/register/professionals/index.tsx
-
-import React from 'react';
 import { auth } from '../../../services/firebase';
 import { useProfessionalRegister } from './useProfessionalRegister';
 import ProfessionalBasicDataForm from './ProfessionalBasicDataForm';

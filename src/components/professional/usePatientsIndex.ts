@@ -4,9 +4,6 @@ import {
   collection,
   doc,
   getDoc,
-  getDocs,
-  query,
-  where,
   writeBatch,
   deleteField,
 } from 'firebase/firestore';

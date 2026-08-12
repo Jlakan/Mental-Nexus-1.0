@@ -15,6 +15,7 @@ interface FormData {
   fullName: string;
   dob: string;
   contactNumber: string;
+  phone: string
 }
 
 export const usePatientRegister = (onComplete: () => void) => {
@@ -26,6 +27,7 @@ export const usePatientRegister = (onComplete: () => void) => {
     fullName: '',
     dob: '',
     contactNumber: '',
+    phone: '',
   });
 
   const [professions, setProfessions] = useState<any[]>([]);

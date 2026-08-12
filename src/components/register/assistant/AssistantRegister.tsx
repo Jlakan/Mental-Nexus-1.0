@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAssistantRegister } from './hooks/useAssistantRegister';
 import Step1BasicData from './steps/Step1BasicData';
 import Step2Specialty from './steps/Step2Specialty';

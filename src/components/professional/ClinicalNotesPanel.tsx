@@ -253,8 +253,8 @@ export const ClinicalNotesPanel = ({
     setCurrentPage(0);
   }, [searchTerm]);
 
-  const handlePrevPage = () => setCurrentPage((p) => Math.max(0, safeCurrentPage - 1));
-  const handleNextPage = () => setCurrentPage((p) => Math.min(totalPages - 1, safeCurrentPage + 1));
+  const handlePrevPage = () => setCurrentPage((_p) => Math.max(0, safeCurrentPage - 1));
+  const handleNextPage = () => setCurrentPage((_p) => Math.min(totalPages - 1, safeCurrentPage + 1));
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

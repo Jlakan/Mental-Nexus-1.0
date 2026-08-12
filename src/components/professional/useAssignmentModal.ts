@@ -7,7 +7,6 @@ import {
   getDoc,
   writeBatch,
   serverTimestamp,
-  setDoc,
   increment,
 } from 'firebase/firestore';
 import { db } from '../../services/firebase';
@@ -172,10 +171,9 @@ export function useAssignmentModal(
     setSaving(true);
     try {
       const batch = writeBatch(db);
-      const tierData = MISSION_TIERS[selectedTier] || MISSION_TIERS['EASY'];
+      const tierData = MISSION_TIERS[selectedTier as keyof typeof MISSION_TIERS] || MISSION_TIERS['EASY'];
       const currentVolume =
         missionType === 'daily' ? selectedDays.length * durationWeeks : 1;
-
       const frequencyMap: { [key: string]: number } = {};
       selectedDays.forEach((d) => (frequencyMap[d] = 1));
 

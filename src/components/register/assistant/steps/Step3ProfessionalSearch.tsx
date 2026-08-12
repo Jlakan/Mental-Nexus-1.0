@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 
 // Definimos la interfaz del profesional que viene del índice
 export interface IndexedProfessional {

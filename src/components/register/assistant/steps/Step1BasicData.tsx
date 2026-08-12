@@ -1,5 +1,3 @@
-import React from 'react';
-
 // Definimos los props que el componente Padre le pasará a este hijo
 interface Step1BasicDataProps {
   name: string;
