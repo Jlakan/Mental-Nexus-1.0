@@ -9,8 +9,6 @@ import {
   doc,
   getDoc,
   setDoc,
-  writeBatch,
-  collection,
 } from 'firebase/firestore';
 import { auth, db } from './services/firebase';
 
@@ -35,65 +33,6 @@ import AssistantPanel from './components/AssistantPanel';
 
 // IMPORTACIÓN DE LA AGENDA
 import AgendaMain from './components/agenda/AgendaMain';
-
-// --- FUNCIÓN ADICIONAL PARA INICIALIZAR EL DIRECTORIO DUMMY ---
-async function initializeDummyDirectory() {
-  const batch = writeBatch(db);
-  const professionId = 'psicologia';
-  const dummyProfessionalId = 'dummy_prof_001';
-
-  const professionMetaRef = doc(db, 'professions', professionId);
-  const shardRef = doc(
-    db,
-    'professions',
-    professionId,
-    'directory_shards',
-    'shard_0'
-  );
-
-  const dummyIndexProfile = {
-    fullName: 'Psic. Alejandro Martínez (Demo)',
-    clinicName: 'Centro Regional de Desarrollo Infantil',
-    clinicCity: 'Durango, Dgo.',
-    clinicAddress: 'Av. 20 de Noviembre #102, Col. Centro',
-    publicPhone: '6181234567',
-    links: {
-      maps: null,
-      facebook: null,
-      instagram: null,
-    },
-  };
-
-  batch.set(
-    professionMetaRef,
-    {
-      name: 'psicología',
-      totalProfessionals: 1,
-      totalShards: 1,
-      active: true,
-    },
-    { merge: true }
-  );
-
-  batch.set(
-    shardRef,
-    {
-      professionals: {
-        [dummyProfessionalId]: dummyIndexProfile,
-      },
-    },
-    { merge: true }
-  );
-
-  try {
-    await batch.commit();
-    console.log(
-      'Estructura de directorios e índice dummy creados con éxito en Firestore.'
-    );
-  } catch (error) {
-    console.error('Error al inicializar el directorio dummy:', error);
-  }
-}
 
 export default function App() {
   // ---------------------------------------------------------------------------
@@ -120,14 +59,6 @@ export default function App() {
       return localStorage.getItem('nexus_assistant_selected_doc');
     }
   );
-
-  // ---------------------------------------------------------------------------
-  // EFECTO ADICIONAL PARA LA CREACIÓN DEL DUMMY (EJECUCIÓN ÚNICA)
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    // Descomenta la línea de abajo para crear la ruta automáticamente en tu base de datos al recargar
-    // initializeDummyDirectory();
-  }, []);
 
   // ---------------------------------------------------------------------------
   // 2. EFECTO DE CARGA Y AUTENTICACIÓN

@@ -10,7 +10,6 @@ import {
   where,
   setDoc,
   writeBatch,
-  deleteDoc,
   collectionGroup,
 } from 'firebase/firestore';
 import { db, auth } from '../services/firebase';
@@ -19,9 +18,6 @@ import { db, auth } from '../services/firebase';
 import AdminCatalogTree from './AdminCatalogTree';
 import GameEconomyPanel from './GameEconomyPanel';
 import AdminBulkTools from './AdminBulkTools';
-
-// Tipos
-import type { Assignment } from '../types';
 
 // Importaciones de Inteligencia
 import { analyzeCatalogBatch } from '../utils/ClinicalEngine';
